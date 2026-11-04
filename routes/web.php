@@ -31,10 +31,10 @@ Route::post('setup/check_db', [SetupController::class, 'checkDB'])->middleware('
 Route::post('setup/check_mail', [SetupController::class, 'checkMail'])->middleware('throttle:10,1')->middleware('guest');
 Route::post('setup/check_pdf', [SetupController::class, 'checkPdf'])->middleware('throttle:10,1')->middleware('guest');
 
-Route::get('password/reset', [ForgotPasswordController::class, 'showLinkRequestForm'])->middleware('domain_db')->name('password.request');
-Route::post('password/email', [ForgotPasswordController::class, 'sendResetLinkEmail'])->middleware('throttle:password-reset')->name('password.email');
-Route::get('password/reset/{token}', [ResetPasswordController::class, 'showResetForm'])->middleware(['domain_db', 'email_db'])->name('password.reset');
-Route::post('password/reset', [ResetPasswordController::class, 'reset'])->middleware('throttle:10,1')->middleware('email_db')->name('password.update');
+Route::get('password/reset', [ForgotPasswordController::class, 'showLinkRequestForm'])->middleware(['oidc_only', 'domain_db'])->name('password.request');
+Route::post('password/email', [ForgotPasswordController::class, 'sendResetLinkEmail'])->middleware(['oidc_only', 'throttle:password-reset'])->name('password.email');
+Route::get('password/reset/{token}', [ResetPasswordController::class, 'showResetForm'])->middleware(['oidc_only', 'domain_db', 'email_db'])->name('password.reset');
+Route::post('password/reset', [ResetPasswordController::class, 'reset'])->middleware(['oidc_only', 'throttle:10,1'])->middleware('email_db')->name('password.update');
 
 Route::get('auth/{provider}', [LoginController::class, 'redirectToProvider']);
 Route::get('calendar_connection/{provider}/callback', [CalendarConnectionController::class, 'callback'])->name('calendar_connection.callback');

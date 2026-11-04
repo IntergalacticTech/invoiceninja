@@ -975,6 +975,8 @@ class LoginController extends BaseController
         return response()->json([
             'oidc_enabled' => !empty(config('services.oidc.client_id')) && !empty(config('services.oidc.issuer')),
             'oidc_provider_label' => config('services.oidc.provider_label', 'OIDC'),
+            // SSO-only mode: the SPA can hide the password form when this is true.
+            'oidc_only' => (bool) config('services.oidc.only', false),
         ]);
     }
 
@@ -1000,6 +1002,10 @@ class LoginController extends BaseController
 
         if (!$socialite_user || !$socialite_user->getId()) { //@phpstan-ignore-line
             return response()->json(['message' => 'OIDC sign-in failed: missing subject identifier.'], 400);
+        }
+
+        if ($refusal = $this->refuseOidcUserOutsideAllowedDomains($socialite_user)) {
+            return $refusal;
         }
 
         $user = MultiDB::hasUser([
@@ -1073,6 +1079,49 @@ class LoginController extends BaseController
         Cache::put('oidc.exchange.' . $exchange_code, $company_token->token, now()->addSeconds(60));
 
         return redirect(config('ninja.react_url') . '/oauth-callback?code=' . $exchange_code);
+    }
+
+    /**
+     * Enforce OIDC_ALLOWED_DOMAINS on an OIDC callback.
+     *
+     * When the list is set, the email domain must be on it. Google
+     * additionally sends an `hd` (hosted domain) claim for Workspace
+     * accounts: it must match the list too, and when the issuer is Google
+     * it must be present, so a personal Google account is refused even if
+     * its address happens to use an allowed domain. Returns the refusal
+     * response, or null when the user may continue.
+     *
+     * @param \Laravel\Socialite\Two\User $socialite_user
+     * @return \Illuminate\Http\JsonResponse|null
+     */
+    private function refuseOidcUserOutsideAllowedDomains($socialite_user)
+    {
+        $allowed = (array) config('services.oidc.allowed_domains', []);
+
+        if (count($allowed) === 0) {
+            return null;
+        }
+
+        $email = strtolower((string) $socialite_user->getEmail());
+        $domain = str_contains($email, '@') ? substr(strrchr($email, '@'), 1) : '';
+
+        $raw = (array) $socialite_user->getRaw();
+        $hd = isset($raw['hd']) ? strtolower((string) $raw['hd']) : null;
+
+        $issuer_is_google = rtrim((string) config('services.oidc.issuer'), '/') === 'https://accounts.google.com';
+
+        $permitted = $domain !== ''
+            && in_array($domain, $allowed, true)
+            && ($hd === null || in_array($hd, $allowed, true))
+            && (!$issuer_is_google || $hd !== null);
+
+        if ($permitted) {
+            return null;
+        }
+
+        nlog('OIDC sign-in refused: ' . $email . ' (hd=' . ($hd ?? 'none') . ') is outside OIDC_ALLOWED_DOMAINS.');
+
+        return response()->json(['message' => 'Sign-in is limited to accounts from an approved domain.'], 403);
     }
 
     /**

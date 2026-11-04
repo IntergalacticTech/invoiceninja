@@ -84,6 +84,17 @@ return [
         'scopes'         => env('OIDC_SCOPES', 'openid profile email'),
         // Human-readable label used on the Blade login page button.
         'provider_label' => env('OIDC_PROVIDER_LABEL', 'OIDC'),
+        // SSO-only mode: refuse password/passkey login, signup, social-token
+        // login and password reset so OIDC is the only way in. Off by default.
+        'only'           => filter_var(env('OIDC_ONLY', false), FILTER_VALIDATE_BOOLEAN),
+        // Comma-separated list of email domains allowed to sign in through OIDC.
+        // Empty (the default) allows any domain. When set, the callback refuses
+        // emails outside the list and, for Google, tokens whose `hd` claim is
+        // missing or does not match.
+        'allowed_domains' => array_values(array_filter(array_map(
+            fn ($domain) => strtolower(trim($domain)),
+            explode(',', (string) env('OIDC_ALLOWED_DOMAINS', ''))
+        ))),
     ],
 
     'ses' => [

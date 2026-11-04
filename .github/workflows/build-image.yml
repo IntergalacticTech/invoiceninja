@@ -1,0 +1,179 @@
+# Builds a VictoryCTO release of Invoice Ninja from this fork and pushes the
+# container image to ECR (account 732770059798, repository "invoiceninja").
+#
+#   git tag v5.13.49-victory.1 && git push origin v5.13.49-victory.1
+#
+# 1. release: production Composer install + compiled React UI, packed the way
+#    upstream's React Release workflow does it, attached to a GitHub release on
+#    this fork as invoiceninja.tar.gz.
+# 2. image: Invoice Ninja's official Debian Dockerfile with URL pointing at that
+#    tarball, built natively on arm64 (Graviton Fargate), pushed with the tag as
+#    an immutable ECR tag.
+#
+# AWS access is GitHub OIDC -> role invoiceninja-gha-ecr-push (created by the
+# invoiceninja stack in IntergalacticTech/twenty-crm-infra). No AWS keys.
+
+name: build-image
+
+on:
+  push:
+    tags:
+      - "v*-victory.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to rebuild the image for (e.g. v5.13.49-victory.1)"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ROLE_ARN: arn:aws:iam::732770059798:role/invoiceninja-gha-ecr-push
+  ECR_REPOSITORY: invoiceninja
+  DOCKERFILES_REF: debian # invoiceninja/dockerfiles branch
+  PHP_IMAGE_VERSION: "8.3"
+
+jobs:
+  release:
+    name: Release tarball
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # create the release + upload the asset
+    outputs:
+      tag: ${{ github.ref_name }}
+    steps:
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_IMAGE_VERSION }}
+          extensions: mysql, mysqlnd, sqlite3, bcmath, gd, curl, zip, openssl, mbstring, xml, intl
+
+      - name: Checkout fork at the tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check the tag matches VERSION.txt
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="$(tr -d '[:space:]' < VERSION.txt)"
+          case "$TAG" in
+            "v${VERSION}-victory."*) echo "tag $TAG builds Invoice Ninja $VERSION" ;;
+            *) echo "tag $TAG does not match VERSION.txt ($VERSION); tag as v${VERSION}-victory.N" >&2; exit 1 ;;
+          esac
+
+      - name: Install composer dependencies (production)
+        run: composer install --no-dev -o --no-interaction --no-progress
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build the React admin app (invoiceninja/ui)
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/invoiceninja/ui.git
+          cd ui
+          sed -i 's/VITE_IS_TEST=true/VITE_IS_TEST=false/' .env.example
+          echo VITE_PUSHER_APP_KEY=f0111a02782708da651f >> .env.example
+          cp .env.example .env
+          cp ../vite.config.ts.react ./vite.config.js
+          sed -i "/\"version\"/c\  \"version\": \"${GITHUB_REF_NAME} - $(date '+%Y-%m-%d')\"," package.json
+          npm ci || npm i
+          npm run build
+          cp -r dist/* ../public/
+          mv ../public/index.html ../resources/views/react/index.blade.php
+
+      - name: Build client-portal assets
+        run: |
+          npm ci || npm i
+          npm run production
+
+      - name: Pack
+        run: |
+          set -euo pipefail
+          rm -rf node_modules ui .git
+          rm -f .env
+          find . -path ./vendor -prune -o -type f -exec chmod 644 {} \+
+          find . -path ./vendor -prune -o -type d -exec chmod 755 {} \+
+          shopt -s dotglob
+          tar --exclude='public/storage' --exclude='invoiceninja.zip' -zcf "$RUNNER_TEMP/invoiceninja.tar.gz" *
+          ls -l "$RUNNER_TEMP/invoiceninja.tar.gz"
+
+      - name: Create GitHub release with the tarball
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: "VictoryCTO build of Invoice Ninja ${{ github.ref_name }} (fork of invoiceninja/invoiceninja v5-stable with SSO-only mode)."
+          files: ${{ runner.temp }}/invoiceninja.tar.gz
+          fail_on_unmatched_files: true
+
+  image:
+    name: Build and push image (arm64)
+    needs: [release]
+    if: always() && (needs.release.result == 'success' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      id-token: write # OIDC to AWS
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          TAG="${{ github.event_name == 'push' && github.ref_name || inputs.tag }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/invoiceninja.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the release asset
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 18); do
+            code=$(curl -sL -o /dev/null -w '%{http_code}' "${{ steps.tag.outputs.url }}")
+            [ "$code" = "200" ] && exit 0
+            echo "asset not ready yet (HTTP $code), attempt $i/18"; sleep 10
+          done
+          exit 1
+
+      - name: Checkout invoiceninja/dockerfiles (${{ env.DOCKERFILES_REF }})
+        uses: actions/checkout@v4
+        with:
+          repository: invoiceninja/dockerfiles
+          ref: ${{ env.DOCKERFILES_REF }}
+          path: dockerfiles
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: dockerfiles/debian
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          build-args: |
+            URL=${{ steps.tag.outputs.url }}
+            PHP=${{ env.PHP_IMAGE_VERSION }}
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          echo "Pushed ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deploy: terraform apply -var image_tag=${{ steps.tag.outputs.tag }} in twenty-crm-infra/stacks/invoiceninja" >> "$GITHUB_STEP_SUMMARY"

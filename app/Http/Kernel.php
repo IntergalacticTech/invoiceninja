@@ -167,6 +167,7 @@ class Kernel extends HttpKernel
         'document_db' => SetDocumentDb::class,
         'session_domain' => SessionDomains::class,
         'valid_json' => \App\Http\Middleware\ValidJson::class,
+        'oidc_only' => \App\Http\Middleware\OidcOnly::class,
         //we dyanamically add the throttle middleware in RouteServiceProvider
     ];
 

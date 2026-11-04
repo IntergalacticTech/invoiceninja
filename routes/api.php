@@ -139,8 +139,8 @@ use App\PaymentDrivers\PayPalPPCPPaymentDriver;
 use Illuminate\Support\Facades\Route;
 
 Route::group(['middleware' => ['throttle:api', 'api_secret_check']], function () {
-    Route::post('api/v1/signup', [AccountController::class, 'store'])->name('signup.submit')->middleware('throttle:signup');
-    Route::post('api/v1/oauth_login', [LoginController::class, 'oauthApiLogin']);
+    Route::post('api/v1/signup', [AccountController::class, 'store'])->name('signup.submit')->middleware(['throttle:signup', 'oidc_only']);
+    Route::post('api/v1/oauth_login', [LoginController::class, 'oauthApiLogin'])->middleware('oidc_only');
     Route::get('api/v1/oidc/config', [LoginController::class, 'oidcConfig'])->name('oidc.config');
     Route::post('api/v1/oidc/exchange', [LoginController::class, 'oidcExchange'])->name('oidc.exchange')->middleware('throttle:30,1');
 });
@@ -149,12 +149,12 @@ Route::group(['middleware' => ['throttle:precheck']], function () {
     Route::post('api/v1/login/precheck', [LoginController::class, 'precheck'])->name('login.precheck');
 });
 
-Route::group(['middleware' => ['throttle:login', 'api_secret_check', 'email_db']], function () {
+Route::group(['middleware' => ['throttle:login', 'api_secret_check', 'email_db', 'oidc_only']], function () {
     Route::post('api/v1/login', [LoginController::class, 'apiLogin'])->name('login.submit');
     Route::post('api/v1/passkeys/login/options', [PasskeyController::class, 'loginOptions'])->name('passkeys.login.options');
 });
 
-Route::group(['middleware' => ['throttle:password-reset', 'api_secret_check', 'email_db']], function () {
+Route::group(['middleware' => ['throttle:password-reset', 'api_secret_check', 'email_db', 'oidc_only']], function () {
     Route::post('api/v1/reset_password', [ForgotPasswordController::class, 'sendResetLinkEmail']);
 });
 
