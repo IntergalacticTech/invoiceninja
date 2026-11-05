@@ -7,6 +7,7 @@ import { clearToken, getToken } from './auth/token';
 import { Header } from './components/Header';
 import { Toasts } from './components/Toasts';
 import { Tracker } from './components/Tracker';
+import { EVALUATION_MODE } from './config';
 import { TimerProvider } from './hooks/timer';
 import { MyTasksPage } from './pages/MyTasksPage';
 import { ProjectsPage } from './pages/ProjectsPage';
@@ -69,6 +70,15 @@ export function App({ queryClient, initialNotice }: { queryClient: QueryClient; 
 
   return (
     <QueryClientProvider client={queryClient}>
+      {EVALUATION_MODE && (
+        <aside className="evaluation-note" aria-label="Evaluation notice">
+          <div className="wrap">
+            <strong>Evaluation:</strong> keep logging your work in{' '}
+            <a href="https://victoryteam.avaza.com" target="_blank" rel="noopener noreferrer">Avaza</a>.
+            {' '}Time entered here is for testing and may be replaced during data refreshes.
+          </div>
+        </aside>
+      )}
       {token ? (
         <SessionProvider>
           <TimerProvider>
