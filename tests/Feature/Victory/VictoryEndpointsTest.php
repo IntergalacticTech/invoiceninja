@@ -113,7 +113,7 @@ class VictoryEndpointsTest extends TestCase
         $copy->custom_value1 = '5010318:1002';
         $task->saveQuietly();
         $copy->saveQuietly();
-        $before = $task->getAttributes();
+        $before = $task->fresh()->getAttributes();
         $path = '/api/v1/victory/tasks/' . $task->hashed_id;
         $note = $this->withHeaders(['X-API-TOKEN' => $this->member_token])
             ->postJson($path . '/notes', ['body' => "Testing the screenshot\nLooks good.", 'author' => 'Forged author'])
@@ -150,7 +150,7 @@ class VictoryEndpointsTest extends TestCase
         $this->withHeaders(['X-API-TOKEN' => $this->member_token])->postJson('/api/v1/victory/tasks/' . $copy->hashed_id . '/notes', ['body' => 'Unauthorized'])->assertNotFound();
     }
 
-    public function test_notes_follow_task_visibility_and_are_cleared_by_a_full_task_reset(): void
+    public function test_notes_are_cleared_by_a_full_task_reset(): void
     {
         $task = $this->makeTask($this->member->id, []);
         $path = '/api/v1/victory/tasks/' . $task->hashed_id . '/notes';
@@ -158,6 +158,10 @@ class VictoryEndpointsTest extends TestCase
         $this->assertDatabaseHas('victory_task_notes', ['task_id' => $task->id]);
         $task->forceDelete();
         $this->assertDatabaseMissing('victory_task_notes', ['task_id' => $task->id]);
+    }
+
+    public function test_notes_require_task_visibility(): void
+    {
         $unrelated = $this->makeTask($this->user->id, []);
         $cu = \App\Models\CompanyUser::where('user_id', $this->member->id)->where('company_id', $this->company->id)->firstOrFail();
         $cu->permissions = '';
