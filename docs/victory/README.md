@@ -25,6 +25,13 @@ mirror retains their saved mappings and Invoice Ninja history, skips CRM writes
 for those companies and their contacts, and resumes CRM mirroring if the same
 Twenty record is restored. New Avaza companies still import normally.
 
+The owner confirmed that users should leave task notes in Ninja during
+evaluation. The task panel keeps screenshots, imported Avaza discussion and a
+native note form together. Native notes live in `victory_task_notes`, share
+across person-specific copies within the same project, and survive source
+refreshes. They are test data for the later full wipe/resync. No reset is
+authorized until evaluation is complete.
+
 ## Server changes (kept small so they rebase onto each upstream release)
 
 | Setting / endpoint | What it does | Code |
@@ -34,6 +41,8 @@ Twenty record is restored. New Avaza companies still import normally.
 | `HIDE_FINANCIALS_FROM_NON_ADMINS=true` | API responses for non-admins zero project rates and budget amounts, task rates and invoice links, and client balances. Those fields are also ignored on task and project updates from non-admins, so saving a whole record in the upstream app cannot write the zeros back. | `app/Utils/FinancialVisibility.php`, Project/Task/Client transformers |
 | `GET /api/v1/victory/time_entries` | Time entries flattened to one row per entry for a date range, filterable by person, project and client. Non-admins only get their own. | `app/Http/Controllers/Victory/TimeEntryController.php` |
 | `POST /api/v1/victory/admin_handoff` + `VICTORY_ADMIN_URL` | Gives admins a one-shot code so the upstream admin app opens without a second sign-in. | `app/Http/Controllers/Victory/AdminHandoffController.php` |
+| `PUT /api/v1/victory/tasks/{task}/content` | Admin-only content import; updates description and Avaza metadata while preserving time and billing. | `app/Http/Controllers/Victory/TaskContentController.php` |
+| `GET/POST /api/v1/victory/tasks/{task}/notes` | Team notes, scoped by company, project and task visibility; independent of imported metadata. | `app/Http/Controllers/Victory/TaskNoteController.php` |
 
 Tests: `tests/Feature/Auth/OidcOnlyTest.php`, `tests/Feature/FinancialVisibilityTest.php`,
 `tests/Feature/Victory/VictoryEndpointsTest.php`. The `victory-ci` workflow runs them (and the team
@@ -73,5 +82,29 @@ ECR `invoiceninja`. Deploy by setting `image_tag` in
 twenty-crm-infra `stacks/invoiceninja`, then run `docs/victory/smoke.sh https://projects.victorycto.com [API_TOKEN]`:
 health, OIDC-only, the team app shell, the victory endpoints, and (with a team member's token) that money is zeroed.
 
-Upgrading upstream: rebase the `victory/*` commits onto the new upstream tag,
-run the tests above, tag, deploy.
+## Upstream maintenance
+
+The owner chose to continue with Invoice Ninja for its PHP backend, Google
+authentication and MCP integration, while keeping the custom interface. Keep
+extensions under the Victory namespace and separate tables; use supported APIs
+for integrations. Keep changes to existing upstream behavior small and covered
+by the fork's regression tests. Avoid modifying core time/billing semantics to
+add collaboration features.
+
+`upstream-compatibility` reports merge conflicts against the latest stable
+upstream release on each pull request and can also be run manually. It compares
+trees using `VERSION.txt` as the upstream base, without updating the branch or
+running migrations. Conflict warnings are informational so an upstream release
+does not block unrelated fixes; failures to run the check fail the job.
+
+For an actual upgrade, resolve the upstream merge in an isolated branch, run
+server and UI checks, validate database migrations and representative migrated
+tasks in staging, then release and deploy through the infrastructure PR plan.
+A clean text merge alone does not establish runtime compatibility.
+
+MCP belongs in an API adapter rather than core task/billing classes. The
+`billing-tools/docs/invoiceninja-admin-runbook.md` documents the current external
+stdio adapter and dedicated API token setup; its default mode is read-only.
+Keep Google-only browser sign-in and role-based data access intact when adding
+integration tools. Check MCP tool contracts alongside the API when upgrading;
+do not treat documented setup instructions as proof of a live connection.
