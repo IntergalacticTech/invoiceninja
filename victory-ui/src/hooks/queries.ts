@@ -14,8 +14,9 @@ import type { Client, Project, Task, User } from '../api/types';
 import { useSession } from '../auth/session';
 import { addDays, todayYmd } from '../domain/dates';
 import { fullName } from '../domain/people';
-import { buildStatusGroups, doneGroups, idsOf, openGroups, type StatusGroup } from '../domain/statuses';
+import { buildStatusGroups, doneGroups, groupOf, idsOf, openGroups, type StatusGroup } from '../domain/statuses';
 import { lastLogged, parseTimeLog } from '../domain/timeLog';
+import { groupWorkItems } from '../domain/workItems';
 
 const FIVE_MIN = 5 * 60 * 1000;
 
@@ -144,21 +145,49 @@ export function useProjectTasks(projectId: string | undefined, groups: StatusGro
   };
 }
 
-/** Task counts per status column for one project (per_page=1 queries; small and cached). */
+/**
+ * Card counts per status column for one project. Open columns count cards (every person's copies
+ * of a task as one), from the same open-task query the board uses, so the project card and the
+ * board agree. Done columns can hold years of tasks, so they keep the server's cheap total (which
+ * counts copies) rather than downloading them.
+ */
 export function useProjectCounts(projectId: string, groups: StatusGroup[], enabled = true) {
-  const results = useQueries({
-    queries: groups.map((g) => ({
+  const open = openGroups(groups);
+  const openIds = idsOf(open).join(',');
+  const openQ = useQuery({
+    queryKey: ['tasks', 'project', projectId, 'open', openIds],
+    queryFn: () =>
+      openIds
+        ? listTasks({ project_tasks: projectId, task_status: openIds, include: 'assigned_user', sort: 'status_order|asc' })
+        : Promise.resolve([] as Task[]),
+    enabled: enabled && groups.length > 0,
+    staleTime: 30 * 1000,
+  });
+  const done = doneGroups(groups);
+  const doneResults = useQueries({
+    queries: done.map((g) => ({
       queryKey: ['tasks', 'count', projectId, g.statusIds.join(',')],
       queryFn: () => countTasks({ project_tasks: projectId, task_status: g.statusIds.join(',') }),
       staleTime: FIVE_MIN,
       enabled,
     })),
   });
-  const counts: Record<string, number | undefined> = {};
-  groups.forEach((g, i) => {
-    counts[g.key] = results[i]?.data;
-  });
-  return counts;
+  const doneKey = doneResults.map((r) => r.data ?? '').join(',');
+  return useMemo(() => {
+    const counts: Record<string, number | undefined> = {};
+    if (openQ.data) {
+      for (const g of open) counts[g.key] = 0;
+      for (const item of groupWorkItems(openQ.data)) {
+        const g = groupOf(open, item.statusId);
+        if (g) counts[g.key] = (counts[g.key] ?? 0) + 1;
+      }
+    }
+    done.forEach((g, i) => {
+      counts[g.key] = doneResults[i]?.data;
+    });
+    return counts;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- doneResults is a new array each render; doneKey tracks its data
+  }, [openQ.data, open, done, doneKey]);
 }
 
 /** Last time anything was logged on a project, from its few most recently updated tasks. */
