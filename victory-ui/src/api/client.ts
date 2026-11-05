@@ -93,7 +93,7 @@ export function stripFinancials<T>(value: T): T {
       if (MONEY_KEYS.has(key)) {
         // invoice_id is kept as a flag (the timer cannot restart an invoiced task) but emptied of ids.
         if (key === 'invoice_id') obj[key] = obj[key] ? 'invoiced' : '';
-        else delete obj[key];
+        else Reflect.deleteProperty(obj, key);
       } else {
         stripFinancials(obj[key]);
       }
