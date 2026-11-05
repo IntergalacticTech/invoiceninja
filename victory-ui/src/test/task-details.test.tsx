@@ -27,6 +27,8 @@ describe('task details', () => {
     await within(dialog).findByText('Please capitalize Extract.');
     expect(within(dialog).getByRole('img', { name: 'Report screenshot' })).toBeVisible();
     expect(within(dialog).queryByText(/Continue the conversation/)).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Write a note' }));
+    expect(within(dialog).getByRole('textbox', { name: 'Add a note' })).toHaveFocus();
     await user.type(within(dialog).getByRole('textbox', { name: 'Add a note' }), 'The screenshot looks good.');
     await user.click(within(dialog).getByRole('button', { name: 'Add note' }));
     await within(dialog).findByText('The screenshot looks good.');

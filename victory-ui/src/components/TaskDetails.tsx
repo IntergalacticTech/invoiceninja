@@ -105,7 +105,7 @@ function Attachments({ files }: { files: TaskAttachment[] }) {
 
 function TaskNotes({ taskId }: { taskId: string }) {
   const client = useQueryClient();
-  const query = useQuery({ queryKey: ['task-notes', taskId], queryFn: () => getTaskNotes(taskId) });
+  const query = useQuery({ queryKey: ['task-notes', taskId], queryFn: () => getTaskNotes(taskId), refetchInterval: 30_000 });
   const [body, setBody] = useState('');
   const save = useMutation({ mutationFn: (value: string) => addTaskNote(taskId, value), onSuccess: (note) => {
     client.setQueryData<Awaited<ReturnType<typeof getTaskNotes>>>(['task-notes', taskId], old => [...(old ?? []).filter(n => n.id !== note.id), note]);
@@ -166,7 +166,10 @@ export function TaskDetails({ taskId }: { taskId: string }) {
     <div className="task-details" role="dialog" aria-modal="true" aria-labelledby="task-detail-title" tabIndex={-1} ref={root}>
       <header className="task-detail-head">
         <div><p className="sub">Task details{content?.section || parsed.section ? ` · ${content?.section || parsed.section}` : ''}</p><h1 id="task-detail-title">{title}</h1></div>
-        <button type="button" className="btn ghost" onClick={closeTask} aria-label="Close task details">Close ×</button>
+        <div className="task-detail-actions">
+          {task && <button type="button" className="btn ghost" onClick={() => document.getElementById('task-note-body')?.focus()}>Write a note</button>}
+          <button type="button" className="btn ghost" onClick={closeTask} aria-label="Close task details">Close ×</button>
+        </div>
       </header>
       {query.isPending && <p role="status">Loading task details…</p>}
       {query.isError && <p role="alert">Could not load this task. {errorMessage(query.error)} <button type="button" onClick={() => void query.refetch()}>Try again</button></p>}
