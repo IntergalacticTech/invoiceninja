@@ -124,7 +124,14 @@ export function useProjectTasks(projectId: string | undefined, groups: StatusGro
     placeholderData: keepPreviousData,
   });
 
-  const tasks = useMemo(() => [...(open.data ?? []), ...(done.data?.data ?? [])], [open.data, done.data]);
+  const tasks = useMemo(() => {
+    const byId = new Map<string, Task>();
+    for (const t of [...(open.data ?? []), ...(done.data?.data ?? [])]) {
+      const seen = byId.get(t.id);
+      if (!seen || t.updated_at >= seen.updated_at) byId.set(t.id, t);
+    }
+    return [...byId.values()];
+  }, [open.data, done.data]);
   const doneTotal = done.data?.meta?.pagination?.total ?? done.data?.data.length ?? 0;
 
   return {

@@ -64,7 +64,6 @@ export function Tracker() {
   const session = useSession();
   const timer = useTimer();
   const { running } = timer;
-  const now = useNow(true);
 
   const { data: projects = [] } = useProjects();
   const clients = useClientMap();
@@ -105,6 +104,7 @@ export function Tracker() {
   const today = todayYmd(session.timezone);
   const todayQ = useTimeEntries(today, today, session.user.id);
   const todayEntries = useMemo(() => todayQ.data ?? [], [todayQ.data]);
+  const now = useNow(Boolean(running) || todayEntries.some((e) => e.end === 0));
   const runningListed = running && todayEntries.some((e) => e.task_id === running.task.id && e.start === running.start);
   const todaySeconds =
     todayEntries.reduce((sum, e) => sum + entrySecondsLive(e, now), 0) +
@@ -194,7 +194,9 @@ export function Tracker() {
             if (running) void timer.saveNote();
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') onToggle();
+            if (e.key !== 'Enter') return;
+            if (running) void timer.saveNote();
+            else onToggle();
           }}
         />
         <span className={`tr-clock${running ? ' on' : ''}`} aria-live="off" aria-label="Elapsed time">
