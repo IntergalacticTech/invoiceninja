@@ -15,6 +15,7 @@ describe('authenticated task documents', () => {
     const url = `${window.location.origin}/api/v1/documents/abc123/download`;
     const image = await loadTaskImage(url);
     expect(image.type).toBe('image/png');
+    expect(image.size).toBe(12);
     expect(token).toBe('fixture-token');
   });
 
