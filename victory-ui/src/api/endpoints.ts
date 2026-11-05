@@ -63,7 +63,11 @@ export async function countTasks(q: TaskQuery): Promise<number> {
   return res.meta?.pagination?.total ?? res.data.length;
 }
 
-export const getTask = (id: string) => api<ItemResponse<Task>>(`/tasks/${encodeURIComponent(id)}`).then((r) => r.data);
+export const getTask = (id: string) =>
+  api<ItemResponse<Task> & { meta?: Task['meta'] }>(`/tasks/${encodeURIComponent(id)}`)
+    // BaseController lifts a single record's meta beside data; collection items
+    // retain their own nested meta.
+    .then((r) => r.meta ? { ...r.data, meta: r.meta } : r.data);
 
 export interface NewTask {
   project_id: string;

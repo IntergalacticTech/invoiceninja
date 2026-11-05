@@ -124,7 +124,7 @@ class VictoryEndpointsTest extends TestCase
         $this->assertSame('<p>Details</p>', $task->meta->avaza['description_html']);
         $this->assertSame('A teammate', $task->meta->avaza['comments'][0]['author']);
         $this->withHeaders(['X-API-TOKEN' => $this->member_token])->getJson('/api/v1/tasks/' . $task->hashed_id)
-            ->assertOk()->assertJsonPath('data.meta.avaza.task_id', 5010318);
+            ->assertOk()->assertJsonPath('meta.avaza.task_id', 5010318);
     }
 
     public function test_content_import_refuses_team_members_and_wrong_source_task(): void
@@ -158,8 +158,29 @@ class VictoryEndpointsTest extends TestCase
             $this->withHeaders(['X-API-TOKEN' => $this->token])->postJson('/api/v1/tasks', [
                 'description' => 'Imported task ' . $number, 'client_id' => $this->client->hashed_id,
                 'project_id' => $this->project->hashed_id, 'time_log' => [], 'meta' => ['avaza' => $this->taskContent()],
-            ])->assertSuccessful()->assertJsonPath('data.meta.avaza.task_id', 5010318);
+            ])->assertSuccessful()->assertJsonPath('meta.avaza.task_id', 5010318);
         }
+    }
+
+    public function test_long_conversations_are_preserved_without_text_column_truncation(): void
+    {
+        $task = $this->makeTask($this->member->id, []);
+        $task->custom_value1 = '5010318:1001';
+        $task->saveQuietly();
+        $content = $this->taskContent();
+        $content['comments'][0]['body_html'] = str_repeat('conversation ', 6000);
+        $this->withHeaders(['X-API-TOKEN' => $this->token])
+            ->putJson('/api/v1/victory/tasks/' . $task->hashed_id . '/content', ['description' => 'Report', 'content' => $content])->assertOk();
+        $this->assertSame($content['comments'][0]['body_html'], $task->fresh()->meta->avaza['comments'][0]['body_html']);
+    }
+
+    public function test_customer_portal_serialization_excludes_team_conversation(): void
+    {
+        $task = $this->makeTask($this->member->id, []);
+        $task->meta = ['avaza' => $this->taskContent()];
+        auth()->setUser($this->contact);
+        $data = (new \App\Transformers\TaskTransformer())->transform($task);
+        $this->assertArrayNotHasKey('avaza', (array) $data['meta']);
     }
 
     public function test_admin_can_filter_by_user(): void
