@@ -52,7 +52,12 @@ jobs:
       DB_USERNAME: root
       DB_PASSWORD: ninja
       CACHE_DRIVER: file
-      QUEUE_CONNECTION: sync
+      # A real queue, as in production and upstream's CI: with the sync driver, queued listeners run
+      # inline and the Queue::before hook in AppServiceProvider resets TruthSource mid-request,
+      # which makes the OIDC sign-in test lose its company token.
+      QUEUE_CONNECTION: redis
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
       SESSION_DRIVER: file
       MAIL_MAILER: log
       PDF_GENERATOR: simulator
@@ -67,13 +72,18 @@ jobs:
           MYSQL_ROOT_PASSWORD: ninja
           MYSQL_DATABASE: ninja
         options: --health-cmd="mariadb-admin ping -pninja" --health-interval=5s --health-timeout=2s --health-retries=10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: --health-cmd="redis-cli ping" --health-interval=5s --health-timeout=2s --health-retries=10
     steps:
       - uses: actions/checkout@v5
 
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.3"
-          extensions: mysql, mysqlnd, sqlite3, bcmath, gmp, gd, curl, zip, openssl, mbstring, xml, intl
+          extensions: mysql, mysqlnd, sqlite3, bcmath, gmp, gd, curl, zip, openssl, mbstring, xml, intl, redis
           tools: composer:v2
 
       - name: Composer cache
@@ -96,8 +106,8 @@ jobs:
         run: |
           # .env values win over the job environment, so pin the ones that differ from upstream's CI.
           cp .env.ci .env
-          sed -i -E 's/^(DB_PORT1?)=.*/\1=3306/; s/^DB_USERNAME=.*/DB_USERNAME=root/; s/^DB_PASSWORD=.*/DB_PASSWORD=ninja/; s/^CACHE_DRIVER=.*/CACHE_DRIVER=file/; s/^QUEUE_CONNECTION=.*/QUEUE_CONNECTION=sync/; s/^SESSION_DRIVER=.*/SESSION_DRIVER=file/' .env
-          grep -E '^(DB_|CACHE_DRIVER|QUEUE_CONNECTION|SESSION_DRIVER)' .env
+          sed -i -E 's/^(DB_PORT1?)=.*/\1=3306/; s/^DB_USERNAME=.*/DB_USERNAME=root/; s/^DB_PASSWORD=.*/DB_PASSWORD=ninja/; s/^CACHE_DRIVER=.*/CACHE_DRIVER=file/; s/^QUEUE_CONNECTION=.*/QUEUE_CONNECTION=redis/; s/^SESSION_DRIVER=.*/SESSION_DRIVER=file/' .env
+          grep -E '^(DB_|CACHE_DRIVER|QUEUE_CONNECTION|SESSION_DRIVER|REDIS)' .env
           php artisan key:generate
           php artisan config:clear
           php artisan migrate --force
