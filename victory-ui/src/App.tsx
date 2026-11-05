@@ -7,6 +7,7 @@ import { clearToken, getToken } from './auth/token';
 import { Header } from './components/Header';
 import { Toasts } from './components/Toasts';
 import { Tracker } from './components/Tracker';
+import { TaskDetails } from './components/TaskDetails';
 import { EVALUATION_MODE } from './config';
 import { TimerProvider } from './hooks/timer';
 import { MyTasksPage } from './pages/MyTasksPage';
@@ -43,6 +44,7 @@ function Shell({ onSignOut }: { onSignOut: () => void }) {
       <main id="main" tabIndex={-1}>
         <div className="wrap">{render ? render(route) : null}</div>
       </main>
+      {route.query.get('task') && <TaskDetails taskId={route.query.get('task') as string} />}
       <Toasts />
     </>
   );

@@ -99,6 +99,69 @@ class VictoryEndpointsTest extends TestCase
         $this->assertArrayNotHasKey('rate', $row);
     }
 
+    private function taskContent(): array
+    {
+        return ['version' => 1, 'task_id' => 5010318, 'title' => 'Report', 'description_html' => '<p>Details</p>',
+            'comments' => [['id' => '1', 'author' => 'A teammate', 'body_html' => '<p>Ready for testing</p>']], 'attachments' => []];
+    }
+
+    public function test_admin_imports_context_without_replacing_time_or_billing_fields(): void
+    {
+        $task = $this->makeTask($this->member->id, [[$this->day('2026-11-02', 9), 0, 'running', true]]);
+        $task->custom_value1 = '5010318:1001';
+        $task->rate = 175;
+        $task->meta = ['calendar_event_id' => 'original-event'];
+        $task->saveQuietly();
+        $before = $task->getAttributes();
+        $this->withHeaders(['X-API-TOKEN' => $this->token])
+            ->putJson('/api/v1/victory/tasks/' . $task->hashed_id . '/content', ['description' => "Report\nSection: Engineering\n\nDetails", 'content' => $this->taskContent()])
+            ->assertOk()->assertJsonPath('data.imported', true);
+        $task->refresh();
+        foreach (['time_log', 'rate', 'assigned_user_id', 'status_id', 'invoice_id', 'duration'] as $field) {
+            $this->assertEquals($before[$field] ?? null, $task->getAttributes()[$field] ?? null, $field);
+        }
+        $this->assertSame('original-event', $task->meta->calendar_event_id);
+        $this->assertSame('<p>Details</p>', $task->meta->avaza['description_html']);
+        $this->assertSame('A teammate', $task->meta->avaza['comments'][0]['author']);
+        $this->withHeaders(['X-API-TOKEN' => $this->member_token])->getJson('/api/v1/tasks/' . $task->hashed_id)
+            ->assertOk()->assertJsonPath('data.meta.avaza.task_id', 5010318);
+    }
+
+    public function test_content_import_refuses_team_members_and_wrong_source_task(): void
+    {
+        $task = $this->makeTask($this->member->id, []);
+        $task->custom_value1 = '5010318:1001';
+        $task->saveQuietly();
+        $path = '/api/v1/victory/tasks/' . $task->hashed_id . '/content';
+        $payload = ['description' => 'Report', 'content' => $this->taskContent()];
+        $this->withHeaders(['X-API-TOKEN' => $this->member_token])->putJson($path, $payload)->assertForbidden();
+        $payload['content']['task_id'] = 999;
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->putJson($path, $payload)->assertStatus(422);
+        $this->assertNull($task->fresh()->meta);
+    }
+
+    public function test_content_import_refuses_tasks_from_another_company(): void
+    {
+        $task = $this->makeTask($this->member->id, []);
+        $other = \App\Models\Company::factory()->create(['account_id' => $this->company->account_id]);
+        $task->company_id = $other->id;
+        $task->custom_value1 = '5010318:1001';
+        $task->saveQuietly();
+        $this->withHeaders(['X-API-TOKEN' => $this->token])
+            ->putJson('/api/v1/victory/tasks/' . $task->hashed_id . '/content', ['description' => 'Report', 'content' => $this->taskContent()])
+            ->assertNotFound();
+    }
+
+    public function test_two_task_copies_with_imported_meta_do_not_conflict_as_calendar_events(): void
+    {
+        foreach ([1, 2] as $number) {
+            $this->withHeaders(['X-API-TOKEN' => $this->token])->postJson('/api/v1/tasks', [
+                'description' => 'Imported task ' . $number, 'client_id' => $this->client->hashed_id,
+                'project_id' => $this->project->hashed_id, 'time_log' => [], 'meta' => ['avaza' => $this->taskContent()],
+            ])->assertSuccessful()->assertJsonPath('data.meta.avaza.task_id', 5010318);
+        }
+    }
+
     public function test_admin_can_filter_by_user(): void
     {
         $this->makeTask($this->member->id, [[$this->day('2026-11-02', 9), $this->day('2026-11-02', 10), 'member', true]]);

@@ -101,8 +101,61 @@ export interface Task {
   updated_at: number;
   archived_at: number;
   is_deleted: boolean;
+  custom_value1?: string;
+  due_date?: string;
+  estimated_duration?: number | null;
+  meta?: { avaza?: AvazaTaskContent; calendar_event_id?: string };
+  documents?: TaskDocument[];
   /** Present when requested with include=assigned_user. */
   assigned_user?: User | null;
+}
+
+export interface TaskDocument {
+  id: string;
+  name: string;
+  url: string;
+  type?: string;
+  size?: number;
+}
+
+export interface TaskAttachment {
+  id: string;
+  name: string;
+  url: string;
+  type?: string;
+}
+
+export interface TaskComment {
+  id: string;
+  author: string;
+  created_at: string;
+  body_html: string;
+  internal?: boolean;
+  edited?: boolean;
+  reply_to_id?: string;
+  reply_to_author?: string;
+  reply_to_html?: string;
+  attachments: TaskAttachment[];
+}
+
+export interface AvazaTaskContent {
+  version: 1;
+  task_id: number;
+  title: string;
+  section: string;
+  description_html: string;
+  source_url: string;
+  source_updated_at?: string;
+  original_status?: string;
+  priority?: string;
+  start_date?: string;
+  due_date?: string;
+  estimated_hours?: number;
+  parent_title?: string;
+  tags?: string[];
+  assignees?: string[];
+  comments: TaskComment[];
+  attachments: TaskAttachment[];
 }
 
 /** GET /api/v1/victory/time_entries */

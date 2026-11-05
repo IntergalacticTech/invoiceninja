@@ -78,7 +78,7 @@ export function makeHandlers(getDb: GetDb, onChange: () => void = () => undefine
     duration: 0,
     date: '',
     due_date: '',
-    meta: {},
+    meta: t.meta ?? {},
     tags: [],
     documents: [],
     project: transformProject(db, me, t.project_id),

@@ -65,6 +65,13 @@ class TaskRepository extends BaseRepository
             return $data;
         }
 
+        // Imported task context has no calendar event and must not participate
+        // in the uniqueness check for calendar-created tasks.
+        if ($meta->calendar_event_id === '') {
+            $data['meta'] = $meta;
+            return $data;
+        }
+
         $userId = (int) $task->user_id;
 
         $originalCalendarEventId = $meta->calendar_event_id;
