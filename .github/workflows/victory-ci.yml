@@ -94,7 +94,10 @@ jobs:
 
       - name: Prepare the application
         run: |
+          # .env values win over the job environment, so pin the ones that differ from upstream's CI.
           cp .env.ci .env
+          sed -i -E 's/^(DB_PORT1?)=.*/\1=3306/; s/^DB_USERNAME=.*/DB_USERNAME=root/; s/^DB_PASSWORD=.*/DB_PASSWORD=ninja/; s/^CACHE_DRIVER=.*/CACHE_DRIVER=file/; s/^QUEUE_CONNECTION=.*/QUEUE_CONNECTION=sync/; s/^SESSION_DRIVER=.*/SESSION_DRIVER=file/' .env
+          grep -E '^(DB_|CACHE_DRIVER|QUEUE_CONNECTION|SESSION_DRIVER)' .env
           php artisan key:generate
           php artisan config:clear
           php artisan migrate --force
