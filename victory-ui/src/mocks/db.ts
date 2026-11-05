@@ -13,6 +13,7 @@
  *  - FinancialVisibility         -> non-admins get rates/amounts zeroed (admins get real values).
  */
 import { buildFixtures, type MockTask, type MockUser } from './fixtures';
+import type { TaskNote } from '../api/endpoints';
 
 export const MOCK_TIMEZONE = 'America/Denver';
 
@@ -23,13 +24,14 @@ export type Db = ReturnType<typeof buildFixtures> & {
   handoffBase: string;
   seq: number;
   clock: number;
+  taskNotes: Record<string, TaskNote[]>;
 };
 
 export const nowUnix = () => Math.floor(Date.now() / 1000);
 
 export function createDb(signInAs = 'u_sam'): Db {
   const now = nowUnix();
-  const db: Db = { ...buildFixtures(now), signInAs, handoffBase: 'https://projects-admin.victorycto.com', seq: 100, clock: now };
+  const db: Db = { ...buildFixtures(now), signInAs, handoffBase: 'https://projects-admin.victorycto.com', seq: 100, clock: now, taskNotes: {} };
   for (const p of db.projects) recalcProject(db, p.id);
   return db;
 }

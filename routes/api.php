@@ -425,6 +425,8 @@ Route::group(['middleware' => ['throttle:api', 'token_auth', 'valid_json','local
     Route::get('victory/time_entries', [\App\Http\Controllers\Victory\TimeEntryController::class, 'index'])->name('victory.time_entries')->middleware('throttle:60,1');
     Route::post('victory/admin_handoff', \App\Http\Controllers\Victory\AdminHandoffController::class)->name('victory.admin_handoff')->middleware('throttle:20,1');
     Route::put('victory/tasks/{task}/content', \App\Http\Controllers\Victory\TaskContentController::class)->name('victory.task_content');
+    Route::get('victory/tasks/{task}/notes', [\App\Http\Controllers\Victory\TaskNoteController::class, 'index'])->name('victory.task_notes');
+    Route::post('victory/tasks/{task}/notes', [\App\Http\Controllers\Victory\TaskNoteController::class, 'store'])->name('victory.task_notes.store')->middleware('throttle:60,1');
     Route::post('reports/preview/{hash}', ReportPreviewController::class);
     Route::post('exports/preview/{hash}', ReportExportController::class);
 

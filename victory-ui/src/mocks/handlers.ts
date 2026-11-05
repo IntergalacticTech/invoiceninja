@@ -64,6 +64,10 @@ function withAuth(getDb: GetDb, resolver: (args: { db: Db; me: MockUser; request
 
 export function makeHandlers(getDb: GetDb, onChange: () => void = () => undefined) {
   const hide = (me: MockUser) => !isAdmin(me);
+  const noteThread = (task: MockTask) => {
+    const key = task.custom_value1 ?? '';
+    return /^([1-9][0-9]*):/.test(key) ? `${task.project_id}:${key.split(':')[0]}` : task.id;
+  };
 
   const transformProject = (db: Db, me: MockUser, id: string) => {
     const p = db.projects.find((x) => x.id === id);
@@ -135,6 +139,19 @@ export function makeHandlers(getDb: GetDb, onChange: () => void = () => undefine
       return json({ token: user?.token ?? '' });
     }),
 
+    http.get(`${API}/victory/tasks/:id/notes`, withAuth(getDb, ({ db, me, params, url }) => {
+      const task = visibleTasks(db, me).find(t => t.id === params.id);
+      return task ? json(paginate(db.taskNotes[noteThread(task)] ?? [], url)) : forbidden();
+    })),
+    http.post(`${API}/victory/tasks/:id/notes`, withAuth(getDb, async ({ db, me, params, request }) => {
+      const task = visibleTasks(db, me).find(t => t.id === params.id);
+      if (!task) return forbidden();
+      const { body } = await request.json() as { body: string };
+      if (!body?.trim() || body.length > 10000) return json({ message: 'A note is required.' }, 422);
+      const note = { id: nextId(db, 'note'), author: `${me.first_name} ${me.last_name}`, body: body.trim(), created_at: new Date().toISOString() };
+      (db.taskNotes[noteThread(task)] ??= []).push(note);
+      return json({ data: note }, 201);
+    })),
     http.post(
       `${API}/refresh_react`,
       withAuth(getDb, ({ me }) =>
