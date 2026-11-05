@@ -23,11 +23,15 @@ class TaskContentController extends Controller
         $data = $request->validate([
             'description' => ['required', 'string', 'max:60000'],
             'content' => ['required', 'array'],
-            'content.version' => ['required', 'integer', 'in:1'],
-            'content.task_id' => ['required', 'integer', 'min:1'],
-            'content.comments' => ['present', 'array'],
-            'content.attachments' => ['present', 'array'],
         ]);
+        // Validate the envelope separately: nested validation would discard
+        // the other context fields from Laravel's validated() result.
+        validator($data['content'], [
+            'version' => ['required', 'integer', 'in:1'],
+            'task_id' => ['required', 'integer', 'min:1'],
+            'comments' => ['present', 'array'],
+            'attachments' => ['present', 'array'],
+        ])->validate();
         abort_unless(explode(':', (string) $task->custom_value1)[0] === (string) $data['content']['task_id'], 422);
 
         DB::transaction(function () use ($task, $data): void {
