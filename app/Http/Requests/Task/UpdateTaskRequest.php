@@ -14,6 +14,7 @@ namespace App\Http\Requests\Task;
 
 use App\Http\Requests\Request;
 use App\Models\Project;
+use App\Utils\FinancialVisibility;
 use App\Models\Task;
 use App\Utils\Traits\ChecksEntityStatus;
 use App\Utils\Traits\MakesHash;
@@ -148,6 +149,12 @@ class UpdateTaskRequest extends Request
     public function prepareForValidation()
     {
         $input = $this->decodePrimaryKeys($this->all());
+
+        // A team member who is not shown money (HIDE_FINANCIALS_FROM_NON_ADMINS) received a
+        // zeroed rate and invoice link; saving a whole task must not write those back.
+        if (FinancialVisibility::hidden()) {
+            unset($input['rate'], $input['invoice_id']);
+        }
 
         if ($this->file('file') instanceof \Illuminate\Http\UploadedFile) {
             $this->files->set('file', [$this->file('file')]);

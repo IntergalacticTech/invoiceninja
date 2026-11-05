@@ -120,6 +120,60 @@ class FinancialVisibilityTest extends TestCase
     }
 
     /**
+     * A team member saving a whole task (as the upstream app does) sends back the zeroed
+     * rate and empty invoice link it was shown. Those fields must be ignored, not written.
+     */
+    public function test_team_member_update_does_not_write_back_zeroed_financials(): void
+    {
+        config(['ninja.hide_financials_from_non_admins' => true]);
+
+        $this->withHeaders(['X-API-TOKEN' => $this->member_token])
+            ->putJson('/api/v1/tasks/' . $this->encodePrimaryKey($this->task->id), [
+                'description' => 'Edited by a team member',
+                'rate' => 0,
+                'invoice_id' => '',
+                'time_log' => $this->task->time_log,
+            ])
+            ->assertStatus(200)
+            ->assertJsonPath('data.description', 'Edited by a team member')
+            ->assertJsonPath('data.rate', 0); // still hidden in the response
+
+        $this->task->refresh();
+
+        $this->assertEquals(175, $this->task->rate);
+        $this->assertEquals($this->invoice->id, $this->task->invoice_id);
+    }
+
+    public function test_admin_update_still_writes_financials_when_setting_is_on(): void
+    {
+        config(['ninja.hide_financials_from_non_admins' => true]);
+
+        $this->withHeaders(['X-API-TOKEN' => $this->token])
+            ->putJson('/api/v1/tasks/' . $this->encodePrimaryKey($this->task->id), [
+                'rate' => 200,
+                'time_log' => $this->task->time_log,
+            ])
+            ->assertStatus(200)
+            ->assertJsonPath('data.rate', 200);
+
+        $this->assertEquals(200, $this->task->fresh()->rate);
+    }
+
+    public function test_team_member_update_writes_rate_when_setting_is_off(): void
+    {
+        config(['ninja.hide_financials_from_non_admins' => false]);
+
+        $this->withHeaders(['X-API-TOKEN' => $this->member_token])
+            ->putJson('/api/v1/tasks/' . $this->encodePrimaryKey($this->task->id), [
+                'rate' => 10,
+                'time_log' => $this->task->time_log,
+            ])
+            ->assertStatus(200);
+
+        $this->assertEquals(10, $this->task->fresh()->rate);
+    }
+
+    /**
      * A non-admin company user with view permissions on projects, tasks and clients.
      */
     private function createTeamMemberToken(): string

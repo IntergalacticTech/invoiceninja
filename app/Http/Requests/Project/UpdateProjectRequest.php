@@ -13,6 +13,7 @@
 namespace App\Http\Requests\Project;
 
 use App\Http\Requests\Request;
+use App\Utils\FinancialVisibility;
 use App\Models\Project;
 use App\Utils\Traits\ChecksEntityStatus;
 use Illuminate\Validation\Rule;
@@ -65,6 +66,11 @@ class UpdateProjectRequest extends Request
     public function prepareForValidation()
     {
         $input = $this->decodePrimaryKeys($this->all());
+
+        // See UpdateTaskRequest: never write back the zeroed money a non-admin was shown.
+        if (FinancialVisibility::hidden()) {
+            unset($input['task_rate'], $input['budgeted_amount']);
+        }
 
 
         if ($this->file('file') instanceof \Illuminate\Http\UploadedFile) {
