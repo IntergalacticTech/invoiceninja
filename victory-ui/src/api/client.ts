@@ -35,6 +35,7 @@ export interface RequestOptions {
   /** Override the stored token (used right after the OIDC exchange). */
   token?: string;
   signal?: AbortSignal;
+  responseType?: 'json' | 'blob';
 }
 
 let onUnauthorized: () => void = () => undefined;
@@ -140,7 +141,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   const headers: Record<string, string> = {
     'X-Requested-With': 'XMLHttpRequest',
     'Content-Type': 'application/json',
-    Accept: 'application/json',
+    Accept: options.responseType === 'blob' ? '*/*' : 'application/json',
   };
   if (token) headers['X-API-TOKEN'] = token;
 
@@ -155,6 +156,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
         signal,
+        redirect: options.responseType === 'blob' ? 'error' : 'follow',
       });
     } catch (error) {
       if ((error as Error).name === 'AbortError') throw error;
@@ -170,6 +172,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
       continue;
     }
 
+    if (response.ok && options.responseType === 'blob') return await response.blob() as T;
     const text = await response.text();
     let parsed: unknown = undefined;
     if (text) {

@@ -63,6 +63,8 @@ body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font-body)
 .task-files { list-style: none; padding: 0; display: flex; gap: 14px; flex-wrap: wrap; }
 .task-files li { max-width: 100%; }
 .task-files a { display: grid; gap: 7px; overflow-wrap: anywhere; font-size: 13px; }
+.task-file-download { border: 0; padding: 4px 0; background: transparent; color: var(--accent); cursor: pointer; text-align: left; text-decoration: underline; font: inherit; font-size: 13px; max-width: 260px; overflow-wrap: anywhere; }
+.task-rich img:not([src]) { display: none; }
 .task-files img { width: min(240px, 100%); max-height: 180px; object-fit: contain; border: 1px solid var(--rule); border-radius: 6px; background: var(--bg); }
 .task-comment { padding: 18px 0; border-bottom: 1px solid var(--rule); }
 .task-comment > header { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
