@@ -40,8 +40,10 @@ flowchart LR
 
 ## Releases
 
-Tag `v<upstream version>-victory.<n>` (for example `v5.13.49-victory.2`). The
-`build-image` workflow builds the release tarball (Composer, upstream React app,
+Run **Actions → release → Run workflow** (pick the branch, default
+`victory/team-app`). It creates the next tag `v<upstream version>-victory.<n>`
+(for example `v5.13.49-victory.3`) and runs `build-image` for it. Pushing such a
+tag by hand still works too. The `build-image` workflow builds the release tarball (Composer, upstream React app,
 team app into `public/team`), publishes it as a GitHub release, builds the
 official Debian image for arm64 without the Saxon extension, and pushes it to
 ECR `invoiceninja`. Deploy by setting `image_tag` in

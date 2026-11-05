@@ -24,6 +24,17 @@ on:
       tag:
         description: "Existing release tag to rebuild the image for (e.g. v5.13.49-victory.1)"
         required: true
+  # Called by release.yml right after it creates the tag (a tag pushed with the
+  # workflow token does not trigger the push event above).
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+      publish:
+        description: "Build the tarball and GitHub release too (not only the image)"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -38,12 +49,14 @@ env:
 jobs:
   release:
     name: Release tarball
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || inputs.publish == true
     runs-on: ubuntu-24.04
     permissions:
       contents: write # create the release + upload the asset
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     outputs:
-      tag: ${{ github.ref_name }}
+      tag: ${{ inputs.tag || github.ref_name }}
     steps:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -54,12 +67,13 @@ jobs:
       - name: Checkout fork at the tag
         uses: actions/checkout@v5
         with:
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 1
 
       - name: Check the tag matches VERSION.txt
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${TAG}"
           VERSION="$(tr -d '[:space:]' < VERSION.txt)"
           case "$TAG" in
             "v${VERSION}-victory."*) echo "tag $TAG builds Invoice Ninja $VERSION" ;;
@@ -83,7 +97,7 @@ jobs:
           echo VITE_PUSHER_APP_KEY=f0111a02782708da651f >> .env.example
           cp .env.example .env
           cp ../vite.config.ts.react ./vite.config.js
-          sed -i "/\"version\"/c\  \"version\": \"${GITHUB_REF_NAME} - $(date '+%Y-%m-%d')\"," package.json
+          sed -i "/\"version\"/c\  \"version\": \"${TAG} - $(date '+%Y-%m-%d')\"," package.json
           npm ci || npm i
           npm run build
           cp -r dist/* ../public/
@@ -121,16 +135,17 @@ jobs:
       - name: Create GitHub release with the tarball
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          body: "VictoryCTO build of Invoice Ninja ${{ github.ref_name }} (fork of invoiceninja/invoiceninja v5-stable with SSO-only mode)."
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: ${{ inputs.tag || github.ref_name }}
+          body: "VictoryCTO build of Invoice Ninja ${{ inputs.tag || github.ref_name }} (fork of invoiceninja/invoiceninja v5-stable with SSO-only mode)."
           files: ${{ runner.temp }}/invoiceninja.tar.gz
           fail_on_unmatched_files: true
 
   image:
     name: Build and push image (arm64)
     needs: [release]
-    if: always() && (needs.release.result == 'success' || github.event_name == 'workflow_dispatch')
+    # Runs after a successful release, or alone when only rebuilding an image.
+    if: always() && (needs.release.result == 'success' || needs.release.result == 'skipped')
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -139,7 +154,7 @@ jobs:
       - name: Resolve tag
         id: tag
         run: |
-          TAG="${{ github.event_name == 'push' && github.ref_name || inputs.tag }}"
+          TAG="${{ inputs.tag || github.ref_name }}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/invoiceninja.tar.gz" >> "$GITHUB_OUTPUT"
 

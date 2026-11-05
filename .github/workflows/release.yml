@@ -1,0 +1,64 @@
+# One-click release: Actions -> release -> Run workflow.
+#
+# Picks the next tag for the version in VERSION.txt (v5.13.49-victory.3 after
+# .2, or .1 for a new upstream version), creates it on the chosen branch, then
+# runs build-image.yml for that tag in the same run: release tarball, GitHub
+# release, arm64 image pushed to ECR. Deploy by setting image_tag in
+# twenty-crm-infra stacks/invoiceninja.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch or commit to release"
+        required: true
+        default: victory/team-app
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Create the next tag
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - id: next
+        name: Work out and push the tag
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < VERSION.txt)"
+          LAST="$(git tag -l "v${VERSION}-victory.*" | sed -E 's/.*-victory\.//' | grep -E '^[0-9]+$' | sort -n | tail -1 || true)"
+          N=$(( ${LAST:-0} + 1 ))
+          TAG="v${VERSION}-victory.${N}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" -m "VictoryCTO build ${N} of Invoice Ninja ${VERSION} from ${{ inputs.ref }} ($(git rev-parse --short HEAD))"
+          git push origin "refs/tags/${TAG}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Tagged **${TAG}** at $(git rev-parse --short HEAD) on ${{ inputs.ref }}" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Build and publish
+    needs: [tag]
+    permissions:
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/build-image.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+      publish: true
