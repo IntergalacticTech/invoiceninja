@@ -145,7 +145,10 @@ cards or list, Mine/All, search, recent vs quiet, budget hours behind a flag, pe
 the selected project: grouped cards, drag and drop plus a keyboard status menu, Board/List views, New task,
 Show more done. The sticky tracker: project and task pickers, General, note, live clock, Today panel with a
 live total. My tasks, grouped by status. The Time week view (previous/next week) with an inline editor for
-finished entries: start, end and note, or delete; written as a time_log-only PUT after re-reading the task. The Admin link
+finished entries: start, end and note, or delete; written as a time_log-only PUT after re-reading the task. Reports: a
+timesheet pivot (rows by project, person, client or task; columns by week, day, month or total) over
+`/victory/time_entries` for a preset or custom period, with client/project/person filters and CSV downloads of the
+table and of the entries (Avaza-style detail). Team members get their own time; admins everyone's. The Admin link
 via handoff (popup-safe), and Expenses/Clients links for admins only. Mock dev mode.
 
 Tests (`src/test`) cover:
@@ -161,6 +164,8 @@ Tests (`src/test`) cover:
 - Stop pressed while the note is still saving (blur on mousedown must not disable the button)
 - Today total and panel with a running entry; drag and drop between and within columns
 - editing and deleting a time entry (times, note, other entries intact), wall clock to unix across DST
+- the pivot (grouping, periods, timezone bucketing, running entry), CSV quoting and totals, period presets,
+  the Reports page as admin (filters, downloads) and as a team member (own time, no Person filter, no money)
 - a status change moving all copies via `tasks/sort` with logs intact
 - no money rendered for an admin whose API returns rates and balances
 - API headers, 429 retry, 422 message, and financial stripping
@@ -175,7 +180,8 @@ Tests (`src/test`) cover:
 - Project cards count task copies per status (server counts); the board counts cards, so a shared task
   reads "2 ready" on the card and one card on the board.
 - **Expenses and Clients for non-admins:** omitted for now. Admins get links to the admin app.
-- **Timesheets / Reports:** not built. Add them to `src/nav.ts` and the `ROUTES` table in `src/App.tsx`.
+- **Reports** cover timesheets only (hours). Money reports stay in the admin app. Scheduled email and PDF
+  output are not built; the CSVs are the hand-off to a spreadsheet. See issue #3 for the Avaza report list.
 - The **General** status default (In progress) and **New task** default (Backlog) are guesses; confirm
   with the owner.
 - `SHOW_BUDGET_HOURS` awaits the owner's decision.

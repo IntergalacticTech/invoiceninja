@@ -30,6 +30,9 @@ export const getStatics = () => api<Statics>('/statics');
 
 export const getProjects = () => fetchAll<Project>('/projects', { status: 'active' }, 200);
 
+/** Active and archived: reports cover time on projects that have since been archived. */
+export const getAllProjects = () => fetchAll<Project>('/projects', { status: 'active,archived' }, 500, 10);
+
 export const getClients = () => fetchAll<Client>('/clients', { status: 'active,archived' }, 500);
 
 /** Users without view_user only get themselves back (BaseController::listResponse). */

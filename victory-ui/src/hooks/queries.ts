@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { keepPreviousData, useQueries, useQuery } from '@tanstack/react-query';
 import {
   countTasks,
+  getAllProjects,
   getClients,
   getProjects,
   getTaskStatuses,
@@ -26,6 +27,12 @@ export function useProjects() {
 
 export function useProjectMap(): Map<string, Project> {
   const { data } = useProjects();
+  return useMemo(() => new Map((data ?? []).map((p) => [p.id, p])), [data]);
+}
+
+/** Every project including archived ones (Reports). Separate key: the rest of the app wants active only. */
+export function useAllProjectsMap(): Map<string, Project> {
+  const { data } = useQuery({ queryKey: ['projects', 'all'], queryFn: getAllProjects, staleTime: FIVE_MIN });
   return useMemo(() => new Map((data ?? []).map((p) => [p.id, p])), [data]);
 }
 

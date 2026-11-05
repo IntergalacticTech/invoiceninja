@@ -260,3 +260,12 @@ table.list tr.editing td { background: var(--accent-soft); }
 .entry-edit input[type="text"] { flex: 1 1 180px; min-width: 120px; }
 .entry-edit .t-name { flex-basis: 100%; }
 .btn.danger { color: #b3261e; }
+
+/* Reports */
+.filters { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin: 14px 0; }
+.filters label { display: inline-flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.filters select, .filters input { border: 1px solid var(--rule); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 7px 10px; font: 14px var(--font-body); max-width: 260px; }
+table.pivot th[scope="row"] { font: 500 14px var(--font-body); text-transform: none; letter-spacing: 0; color: var(--ink); padding: 10px 14px; border-top: 1px solid var(--rule); }
+table.pivot tbody tr:first-child th[scope="row"] { border-top: 0; }
+table.pivot .total { font-weight: 600; }
+table.pivot tfoot th, table.pivot tfoot td { border-top: 2px solid var(--rule); background: var(--accent-soft); }

@@ -10,15 +10,17 @@ import { Tracker } from './components/Tracker';
 import { TimerProvider } from './hooks/timer';
 import { MyTasksPage } from './pages/MyTasksPage';
 import { ProjectsPage } from './pages/ProjectsPage';
+import { ReportsPage } from './pages/ReportsPage';
 import { TimePage } from './pages/TimePage';
 import { navigate, useRoute, type Route } from './router';
 import { clearToasts } from './toasts';
 
-/** Route table: first segment -> page. Add Timesheets / Reports here and in nav.ts. */
+/** Route table: first segment -> page. New sections go here and in nav.ts. */
 const ROUTES: Record<string, (r: Route) => ReactNode> = {
   projects: (r) => <ProjectsPage selectedId={r.segments[1]} />,
   tasks: () => <MyTasksPage />,
   time: (r) => <TimePage week={r.segments[1]} />,
+  reports: () => <ReportsPage />,
 };
 
 function Shell({ onSignOut }: { onSignOut: () => void }) {
