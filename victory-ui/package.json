@@ -1,0 +1,49 @@
+{
+  "name": "victory-ui",
+  "private": true,
+  "version": "0.1.0",
+  "description": "VictoryCTO team front end (projects, tasks, time tracker) for Invoice Ninja v5",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "vite",
+    "dev:mock": "vite --mode mock",
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --max-warnings=0 && tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.81.5",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.4",
+    "@testing-library/dom": "10.4.0",
+    "@testing-library/jest-dom": "6.6.3",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.6.1",
+    "@types/node": "22.15.34",
+    "@types/react": "18.3.23",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "4.6.0",
+    "eslint": "9.39.4",
+    "eslint-plugin-react-hooks": "5.2.0",
+    "globals": "16.3.0",
+    "jsdom": "26.1.0",
+    "msw": "2.10.2",
+    "typescript": "5.8.3",
+    "typescript-eslint": "8.35.1",
+    "vite": "6.3.5",
+    "vitest": "3.2.4"
+  },
+  "msw": {
+    "workerDirectory": [
+      "mock-public"
+    ]
+  }
+}
