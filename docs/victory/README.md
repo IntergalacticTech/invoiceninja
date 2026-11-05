@@ -15,7 +15,8 @@ issue #4. Reporting needs: issue #3.
 | `POST /api/v1/victory/admin_handoff` + `VICTORY_ADMIN_URL` | Gives admins a one-shot code so the upstream admin app opens without a second sign-in. | `app/Http/Controllers/Victory/AdminHandoffController.php` |
 
 Tests: `tests/Feature/Auth/OidcOnlyTest.php`, `tests/Feature/FinancialVisibilityTest.php`,
-`tests/Feature/Victory/VictoryEndpointsTest.php`.
+`tests/Feature/Victory/VictoryEndpointsTest.php`. The `victory-ci` workflow runs them (and the team
+app's lint, tests and build) on every push to `victory/**`.
 
 ## Two front ends, one backend
 
@@ -30,7 +31,8 @@ flowchart LR
 ```
 
 - **Team app** (`victory-ui/`): the default for everyone. Projects (cards or list),
-  tasks (board or list), an always-visible time tracker, My tasks, Time. Served
+  tasks (board or list), an always-visible time tracker, My tasks, Time (with entry
+  editing), Reports (timesheet pivot and CSV downloads over `/victory/time_entries`). Served
   from `public/team` at the root of projects.victorycto.com. Sign-in callbacks
   land on it (`REACT_URL=https://projects.victorycto.com/team`).
 - **Upstream admin app**: unmodified, at projects-admin.victorycto.com, reached
