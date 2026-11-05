@@ -1,18 +1,107 @@
-import { useMemo } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import type { TimeEntry } from '../api/types';
 import { useSession } from '../auth/session';
 import { entrySecondsLive } from '../components/Tracker';
-import { addDays, clock, fmtH, formatYmd, timeOfDay, todayYmd, weekStart, weekdayShort, ymdOfUnix } from '../domain/dates';
+import {
+  addDays,
+  clock,
+  fmtH,
+  formatYmd,
+  timeOfDay,
+  todayYmd,
+  unixFromLocal,
+  weekStart,
+  weekdayShort,
+  ymdOfUnix,
+} from '../domain/dates';
 import { parseDescription } from '../domain/workItems';
 import { useProjectMap, useTimeEntries } from '../hooks/queries';
+import { useEditTimeEntry } from '../hooks/timeEntryEdit';
 import { useNow } from '../hooks/useNow';
 import { href } from '../router';
+import { notify } from '../toasts';
 
 const isYmd = (s?: string) => Boolean(s && /^\d{4}-\d{2}-\d{2}$/.test(s));
 
-/** Week view of my entries (read-only for now; editing is a follow-up). */
+const entryKey = (e: TimeEntry) => `${e.task_id}-${e.start}`;
+
+/**
+ * Inline editor for one finished entry: start and end as wall-clock times on the entry's day
+ * (an end at or before the start means it ran past midnight), plus the note. Running entries are
+ * edited through the tracker.
+ */
+function EntryEditor({ entry, ymd, onClose }: { entry: TimeEntry; ymd: string; onClose: () => void }) {
+  const { timezone } = useSession();
+  const [startT, setStartT] = useState(timeOfDay(entry.start, timezone));
+  const [endT, setEndT] = useState(timeOfDay(entry.end, timezone));
+  const [note, setNote] = useState(entry.description);
+  const edit = useEditTimeEntry();
+  const title = parseDescription(entry.task_description).title;
+
+  const save = (ev: FormEvent) => {
+    ev.preventDefault();
+    if (!/^\d{2}:\d{2}$/.test(startT) || !/^\d{2}:\d{2}$/.test(endT)) {
+      notify('Enter both times as HH:MM.');
+      return;
+    }
+    const start = unixFromLocal(ymd, startT, timezone);
+    let end = unixFromLocal(ymd, endT, timezone);
+    if (end <= start) end += 86400;
+    edit.mutate(
+      { taskId: entry.task_id, originalStart: entry.start, next: [start, end, note.trim(), entry.billable] },
+      { onSuccess: () => { notify('Entry saved.', 'info'); onClose(); } },
+    );
+  };
+
+  const remove = () => {
+    if (!window.confirm(`Delete this ${clock(entry.seconds)} entry on ${title}?`)) return;
+    edit.mutate(
+      { taskId: entry.task_id, originalStart: entry.start, next: null },
+      { onSuccess: () => { notify('Entry deleted.', 'info'); onClose(); } },
+    );
+  };
+
+  return (
+    <tr className="editing">
+      <td />
+      <td colSpan={3}>
+        <form className="entry-edit" aria-label={`Edit entry on ${title}`} onSubmit={save}>
+          <span className="t-name">{title}</span>
+          <label>
+            Start
+            <input type="time" aria-label="Start time" value={startT} required onChange={(e) => setStartT(e.target.value)} />
+          </label>
+          <label>
+            End
+            <input type="time" aria-label="End time" value={endT} required onChange={(e) => setEndT(e.target.value)} />
+          </label>
+          <input
+            type="text"
+            aria-label="Note"
+            placeholder="Note"
+            value={note}
+            maxLength={500}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <button type="submit" className="btn" disabled={edit.isPending}>
+            Save
+          </button>
+          <button type="button" className="btn ghost" disabled={edit.isPending} onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn ghost danger" disabled={edit.isPending} onClick={remove}>
+            Delete
+          </button>
+        </form>
+      </td>
+    </tr>
+  );
+}
+
+/** Week view of my entries; finished entries can be edited or deleted in place. */
 export function TimePage({ week }: { week?: string }) {
   const { timezone, user, dateFormat } = useSession();
+  const [editing, setEditing] = useState<string | null>(null);
   const today = todayYmd(timezone);
   const start = weekStart(isYmd(week) ? (week as string) : today);
   const end = addDays(start, 6);
@@ -92,20 +181,36 @@ export function TimePage({ week }: { week?: string }) {
                 )}
                 {list.map((e) => {
                   const project = projects.get(e.project_id)?.name ?? '';
+                  const title = parseDescription(e.task_description).title;
+                  if (editing === entryKey(e)) {
+                    return <EntryEditor key={entryKey(e)} entry={e} ymd={ymd} onClose={() => setEditing(null)} />;
+                  }
                   return (
-                    <tr key={`${e.task_id}-${e.start}`}>
+                    <tr key={entryKey(e)}>
                       <td />
                       <td className="num nowrap">
                         {timeOfDay(e.start, timezone)}–{e.end === 0 ? 'now' : timeOfDay(e.end, timezone)}
                       </td>
                       <td>
                         <div className="t-name">
-                          {parseDescription(e.task_description).title}
+                          {title}
                           {e.end === 0 && <span className="tag">running</span>}
                         </div>
                         <div className="t-sub">{[project, e.description].filter(Boolean).join(' · ')}</div>
                       </td>
-                      <td className="r num">{clock(entrySecondsLive(e, now))}</td>
+                      <td className="r num nowrap">
+                        {clock(entrySecondsLive(e, now))}
+                        {e.end !== 0 && (
+                          <button
+                            type="button"
+                            className="link edit"
+                            aria-label={`Edit entry on ${title} at ${timeOfDay(e.start, timezone)}`}
+                            onClick={() => setEditing(entryKey(e))}
+                          >
+                            Edit
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -114,7 +219,7 @@ export function TimePage({ week }: { week?: string }) {
           })}
         </table>
       </div>
-      <p className="hidden-note">Entries are read-only here for now. To correct one, ask an admin.</p>
+      <p className="hidden-note">Edit corrects an entry's times or note; a running entry is changed from the tracker.</p>
     </>
   );
 }

@@ -249,3 +249,14 @@ table.list.week tbody.is-today tr.day th { color: var(--accent); }
   .bar .wrap { gap: 10px 16px; }
   .tr-clock { font-size: 20px; }
 }
+
+/* Time page: inline entry editor */
+button.link { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
+button.link.edit { margin-left: 10px; font-size: 12.5px; }
+table.list tr.editing td { background: var(--accent-soft); }
+.entry-edit { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.entry-edit label { display: inline-flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.entry-edit input { border: 1px solid var(--rule); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 6px 8px; font: 14px var(--font-body); }
+.entry-edit input[type="text"] { flex: 1 1 180px; min-width: 120px; }
+.entry-edit .t-name { flex-basis: 100%; }
+.btn.danger { color: #b3261e; }

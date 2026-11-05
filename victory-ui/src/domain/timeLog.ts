@@ -60,3 +60,22 @@ export function withEntryNote(log: LogEntry[], start: number, note: string): Log
   target[2] = note;
   return copy;
 }
+
+/**
+ * Copy of the log with the entry that started at `start` replaced by `next`, kept in start order.
+ * Null when no entry started then (it was edited elsewhere since the page loaded).
+ */
+export function replaceEntry(log: LogEntry[], start: number, next: LogEntry): LogEntry[] | null {
+  const index = log.findIndex((e) => e[0] === start);
+  if (index < 0) return null;
+  const copy = log.map((e) => [...e] as LogEntry);
+  copy[index] = [...next] as LogEntry;
+  return copy.sort((a, b) => a[0] - b[0]);
+}
+
+/** Copy of the log without the entry that started at `start`; null when there is none. */
+export function removeEntry(log: LogEntry[], start: number): LogEntry[] | null {
+  const index = log.findIndex((e) => e[0] === start);
+  if (index < 0) return null;
+  return log.filter((_, i) => i !== index).map((e) => [...e] as LogEntry);
+}

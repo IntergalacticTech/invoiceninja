@@ -133,3 +133,40 @@ export function ago(unix: number, tz: string, nowDate = new Date()): string {
   const months = Math.round(days / 30.4);
   return months < 12 ? `${months} mo ago` : `${(days / 365).toFixed(1)} yr ago`;
 }
+
+const partsFormatters = new Map<string, Intl.DateTimeFormat>();
+
+/** Offset (ms) of tz from UTC at the given instant: wall clock read as UTC, minus the instant. */
+function offsetAt(ms: number, tz: string): number {
+  let f = partsFormatters.get(tz);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    });
+    partsFormatters.set(tz, f);
+  }
+  const p = Object.fromEntries(f.formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  const asUtc = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour) % 24, Number(p.minute), Number(p.second));
+  return asUtc - Math.floor(ms / 1000) * 1000;
+}
+
+/**
+ * Unix time of a wall-clock moment (YYYY-MM-DD + HH:MM) in a timezone. Two passes handle a
+ * daylight-saving change between the guess and the answer; a time inside a spring-forward gap
+ * lands just after the gap.
+ */
+export function unixFromLocal(ymd: string, hhmm: string, tz: string): number {
+  const [y, mo, d] = ymd.split('-').map(Number);
+  const [h, mi] = hhmm.split(':').map(Number);
+  const wall = Date.UTC(y ?? 1970, (mo ?? 1) - 1, d ?? 1, h ?? 0, mi ?? 0, 0);
+  let guess = wall - offsetAt(wall, tz);
+  guess = wall - offsetAt(guess, tz);
+  return Math.floor(guess / 1000);
+}
