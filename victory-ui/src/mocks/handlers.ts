@@ -232,7 +232,9 @@ export function makeHandlers(getDb: GetDb, onChange: () => void = () => undefine
       `${API}/tasks/:id`,
       withAuth(getDb, ({ db, me, params }) => {
         const t = visibleTasks(db, me).find((x) => x.id === params.id);
-        return t ? json({ data: transformTask(db, me, t, []) }) : json({ message: 'Not found' }, 404);
+        if (!t) return json({ message: 'Not found' }, 404);
+        const { meta, ...data } = transformTask(db, me, t, []);
+        return json({ data, meta });
       }),
     ),
 

@@ -20,10 +20,16 @@ class TaskContentController extends Controller
         abort_unless($user->isAdmin() || $user->isOwner(), 403);
         abort_unless((int) $task->company_id === (int) $user->company()->id && !$task->is_deleted, 404);
 
-        $data = $request->validate([
+        // Import is lossless: Laravel's global input middleware trims strings
+        // and changes empty strings to null, including nested HTML/comments.
+        // Validate the original JSON rather than that normalized form input.
+        abort_unless($request->isJson(), 415);
+        $raw = json_decode($request->getContent(), true);
+        abort_unless(is_array($raw), 422);
+        $data = validator($raw, [
             'description' => ['required', 'string', 'max:60000'],
             'content' => ['required', 'array'],
-        ]);
+        ])->validate();
         // Validate the envelope separately: nested validation would discard
         // the other context fields from Laravel's validated() result.
         validator($data['content'], [
