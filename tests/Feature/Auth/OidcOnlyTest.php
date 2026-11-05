@@ -237,7 +237,7 @@ class OidcOnlyTest extends TestCase
 
         $response = $this->get('/auth/oidc?code=abc&state=xyz');
 
-        $response->assertStatus(302);
+        $this->assertSame(302, $response->status(), 'Expected the OIDC callback to redirect; got: ' . $response->getContent());
         $this->assertStringContainsString('/oauth-callback?code=', (string) $response->headers->get('Location'));
 
         $context['user']->refresh();
