@@ -49,7 +49,8 @@ tag by hand still works too. The `build-image` workflow builds the release tarba
 team app into `public/team`), publishes it as a GitHub release, builds the
 official Debian image for arm64 without the Saxon extension, and pushes it to
 ECR `invoiceninja`. Deploy by setting `image_tag` in
-twenty-crm-infra `stacks/invoiceninja`.
+twenty-crm-infra `stacks/invoiceninja`, then run `docs/victory/smoke.sh https://projects.victorycto.com [API_TOKEN]`:
+health, OIDC-only, the team app shell, the victory endpoints, and (with a team member's token) that money is zeroed.
 
 Upgrading upstream: rebase the `victory/*` commits onto the new upstream tag,
 run the tests above, tag, deploy.
