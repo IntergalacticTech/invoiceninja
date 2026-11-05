@@ -17,6 +17,7 @@ use App\Models\Document;
 use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\Project;
+use App\Utils\FinancialVisibility;
 use App\Models\Quote;
 use App\Models\Task;
 use App\Models\User;
@@ -131,6 +132,8 @@ class ProjectTransformer extends EntityTransformer
 
     public function transform(Project $project)
     {
+        $hide = FinancialVisibility::hidden();
+
         return [
             'id' => (string) $this->encodePrimaryKey($project->id),
             'user_id' => (string) $this->encodePrimaryKey($project->user_id),
@@ -142,7 +145,7 @@ class ProjectTransformer extends EntityTransformer
             'updated_at' => (int) $project->updated_at,
             'archived_at' => (int) $project->deleted_at,
             'is_deleted' => (bool) $project->is_deleted,
-            'task_rate' => (float) $project->task_rate,
+            'task_rate' => $hide ? 0.0 : (float) $project->task_rate,
             'due_date' => $project->due_date ?: '',
             'private_notes' => (string) $project->private_notes ?: '',
             'public_notes' => (string) $project->public_notes ?: '',
@@ -154,7 +157,7 @@ class ProjectTransformer extends EntityTransformer
             'color' => (string) $project->color ?: '',
             'current_hours' => (int) $project->current_hours ?: 0,
             'tags' => $this->transformTags($project),
-            'budgeted_amount' => (float) $project->budgeted_amount,
+            'budgeted_amount' => $hide ? 0.0 : (float) $project->budgeted_amount,
         ];
     }
 

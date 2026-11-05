@@ -24,6 +24,8 @@ return [
     'ninja_client_portal' => env('NINJA_CLIENT_PORTAL', 'https://invoiceninja.invoicing.co'),
     'debug_enabled' => env('APP_DEBUG', false),
     'require_https' => env('REQUIRE_HTTPS', true),
+    // Hide rates, budgets, balances and invoice links from non-admin users in API responses.
+    'hide_financials_from_non_admins' => env('HIDE_FINANCIALS_FROM_NON_ADMINS', false),
     'app_url' => rtrim(env('APP_URL', ''), '/'),
     'app_domain' => env('APP_DOMAIN', 'invoicing.co'),
     'app_version' => env('APP_VERSION', '5.13.49'),

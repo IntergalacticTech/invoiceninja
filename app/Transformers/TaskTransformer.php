@@ -17,6 +17,7 @@ use App\Models\Document;
 use App\Models\Invoice;
 use App\Models\Project;
 use App\Models\Task;
+use App\Utils\FinancialVisibility;
 use App\Models\TaskStatus;
 use App\Models\User;
 use App\Utils\Traits\MakesHash;
@@ -121,6 +122,8 @@ class TaskTransformer extends EntityTransformer
 
     public function transform(Task $task)
     {
+        $hide = FinancialVisibility::hidden();
+
         return [
             'id' => (string) $this->encodePrimaryKey($task->id),
             'user_id' => (string) $this->encodePrimaryKey($task->user_id),
@@ -128,11 +131,11 @@ class TaskTransformer extends EntityTransformer
             'number' => (string) $task->number ?: '',
             'description' => (string) $task->description ?: '',
             'duration' => (int) $task->duration ?: 0,
-            'rate' => (float) $task->rate ?: 0,
+            'rate' => $hide ? 0.0 : ((float) $task->rate ?: 0),
             'created_at' => (int) $task->created_at,
             'updated_at' => (int) $task->updated_at,
             'archived_at' => (int) $task->deleted_at,
-            'invoice_id' => $this->encodePrimaryKey($task->invoice_id) ?: '',
+            'invoice_id' => $hide ? '' : ($this->encodePrimaryKey($task->invoice_id) ?: ''),
             'client_id' => $this->encodePrimaryKey($task->client_id) ?: '',
             'project_id' => $this->encodePrimaryKey($task->project_id) ?: '',
             'is_deleted' => (bool) $task->is_deleted,

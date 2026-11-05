@@ -14,6 +14,7 @@ namespace App\Transformers;
 
 use stdClass;
 use App\Models\Client;
+use App\Utils\FinancialVisibility;
 use App\Models\Activity;
 use App\Models\Document;
 use App\Models\Location;
@@ -131,6 +132,8 @@ class ClientTransformer extends EntityTransformer
      */
     public function transform(Client $client)
     {
+        $hide = FinancialVisibility::hidden();
+
         return [
             'id' => $this->encodePrimaryKey($client->id),
             'user_id' => $this->encodePrimaryKey($client->user_id),
@@ -138,11 +141,11 @@ class ClientTransformer extends EntityTransformer
             'name' => $client->name ?: '',
             'website' => $client->website ?: '',
             'private_notes' => $client->private_notes ?: '',
-            'balance' => (float) $client->balance,
+            'balance' => $hide ? 0.0 : (float) $client->balance,
             'group_settings_id' => isset($client->group_settings_id) ? (string) $this->encodePrimaryKey($client->group_settings_id) : '',
-            'paid_to_date' => (float) $client->paid_to_date,
-            'payment_balance' => (float) $client->payment_balance,
-            'credit_balance' => (float) $client->credit_balance,
+            'paid_to_date' => $hide ? 0.0 : (float) $client->paid_to_date,
+            'payment_balance' => $hide ? 0.0 : (float) $client->payment_balance,
+            'credit_balance' => $hide ? 0.0 : (float) $client->credit_balance,
             'last_login' => (int) max(0, (int)$client->last_login),
             'size_id' => (string) $client->size_id,
             'public_notes' => $client->public_notes ?: '',
