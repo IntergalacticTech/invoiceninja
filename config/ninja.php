@@ -6,6 +6,8 @@ return [
     'admin_token' => env('NINJA_ADMIN_TOKEN', ''),
     'license_url' => 'https://app.invoiceninja.com',
     'react_url' => env('REACT_URL', env('APP_URL', '')),
+    // Where the unmodified upstream admin app is served when a separate team app owns REACT_URL.
+    'victory_admin_url' => env('VICTORY_ADMIN_URL', ''),
     'calendar' => [
         'native_redirect' => env('CALENDAR_NATIVE_REDIRECT', 'invoiceninja://calendar_connection/complete'),
     ],

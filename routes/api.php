@@ -420,6 +420,10 @@ Route::group(['middleware' => ['throttle:api', 'token_auth', 'valid_json','local
     Route::post('reports/tax_period_report', TaxPeriodReportController::class);
     Route::post('reports/user_sales_report', UserSalesReportController::class);
     Route::post('reports/projects', ProjectReportController::class);
+
+    // VictoryCTO team app
+    Route::get('victory/time_entries', [\App\Http\Controllers\Victory\TimeEntryController::class, 'index'])->name('victory.time_entries')->middleware('throttle:60,1');
+    Route::post('victory/admin_handoff', \App\Http\Controllers\Victory\AdminHandoffController::class)->name('victory.admin_handoff')->middleware('throttle:20,1');
     Route::post('reports/preview/{hash}', ReportPreviewController::class);
     Route::post('exports/preview/{hash}', ReportExportController::class);
 
