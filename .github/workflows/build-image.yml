@@ -166,9 +166,12 @@ jobs:
           platforms: linux/arm64
           push: true
           provenance: false
+          # php_saxon empty: SaxonC has no arm64 download the installer can find,
+          # and it is only used for e-invoice XSLT transforms, which we do not use.
           build-args: |
             URL=${{ steps.tag.outputs.url }}
             PHP=${{ env.PHP_IMAGE_VERSION }}
+            php_saxon=
           tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
