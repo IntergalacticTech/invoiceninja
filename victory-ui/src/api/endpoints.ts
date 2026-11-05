@@ -69,6 +69,11 @@ export const getTask = (id: string) =>
     // retain their own nested meta.
     .then((r) => r.meta ? { ...r.data, meta: r.meta } : r.data);
 
+export interface TaskNote { id: string; author: string; body: string; created_at: string }
+export const getTaskNotes = (id: string) => fetchAll<TaskNote>(`/victory/tasks/${encodeURIComponent(id)}/notes`, {}, 200, 50);
+export const addTaskNote = (id: string, body: string) =>
+  api<ItemResponse<TaskNote>>(`/victory/tasks/${encodeURIComponent(id)}/notes`, { method: 'POST', body: { body } }).then(r => r.data);
+
 export interface NewTask {
   project_id: string;
   client_id: string;

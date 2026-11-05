@@ -105,6 +105,71 @@ class VictoryEndpointsTest extends TestCase
             'comments' => [['id' => '1', 'author' => 'A teammate', 'body_html' => '<p>Ready for testing</p>']], 'attachments' => []];
     }
 
+    public function test_team_notes_are_shared_across_task_copies_and_survive_content_imports(): void
+    {
+        $task = $this->makeTask($this->member->id, [[$this->day('2026-11-02', 9), 0, 'running', true]]);
+        $copy = $this->makeTask($this->user->id, []);
+        $task->custom_value1 = '5010318:1001';
+        $copy->custom_value1 = '5010318:1002';
+        $task->saveQuietly();
+        $copy->saveQuietly();
+        $before = $task->fresh()->getAttributes();
+        $path = '/api/v1/victory/tasks/' . $task->hashed_id;
+        $note = $this->withHeaders(['X-API-TOKEN' => $this->member_token])
+            ->postJson($path . '/notes', ['body' => "Testing the screenshot\nLooks good.", 'author' => 'Forged author'])
+            ->assertCreated()->assertJsonPath('data.body', "Testing the screenshot\nLooks good.")->json('data');
+        $this->assertSame(trim($this->member->name()), $note['author']);
+        $this->withHeaders(['X-API-TOKEN' => $this->token])
+            ->putJson($path . '/content', ['description' => 'Report', 'content' => $this->taskContent()])->assertOk();
+        $this->withHeaders(['X-API-TOKEN' => $this->member_token])
+            ->getJson('/api/v1/victory/tasks/' . $copy->hashed_id . '/notes')
+            ->assertOk()->assertJsonPath('data.0.id', $note['id'])->assertJsonPath('meta.pagination.total', 1);
+        foreach (['time_log', 'rate', 'assigned_user_id', 'status_id', 'invoice_id', 'duration'] as $field) {
+            $this->assertEquals($before[$field] ?? null, $task->fresh()->getAttributes()[$field] ?? null, $field);
+        }
+    }
+
+    public function test_team_notes_validate_input_and_do_not_cross_projects_or_companies(): void
+    {
+        $task = $this->makeTask($this->member->id, []);
+        $task->custom_value1 = '5010318:1001';
+        $task->saveQuietly();
+        $path = '/api/v1/victory/tasks/' . $task->hashed_id . '/notes';
+        $this->withHeaders(['X-API-TOKEN' => $this->member_token])->postJson($path, ['body' => '   '])->assertStatus(422);
+        $this->withHeaders(['X-API-TOKEN' => $this->member_token])->postJson($path, ['body' => str_repeat('x', 10001)])->assertStatus(422);
+        $this->withHeaders(['X-API-TOKEN' => $this->member_token])->postJson($path, ['body' => 'Project note'])->assertCreated();
+        $copy = $this->makeTask($this->member->id, []);
+        $copy->custom_value1 = '5010318:1002';
+        $copy->project_id = null;
+        $copy->saveQuietly();
+        $this->withHeaders(['X-API-TOKEN' => $this->member_token])->getJson('/api/v1/victory/tasks/' . $copy->hashed_id . '/notes')->assertOk()->assertJsonCount(0, 'data');
+        $other = \App\Models\Company::factory()->create(['account_id' => $this->company->account_id]);
+        $copy->company_id = $other->id;
+        $copy->saveQuietly();
+        $this->withHeaders(['X-API-TOKEN' => $this->member_token])->getJson('/api/v1/victory/tasks/' . $copy->hashed_id . '/notes')->assertNotFound();
+        $this->withHeaders(['X-API-TOKEN' => $this->member_token])->postJson('/api/v1/victory/tasks/' . $copy->hashed_id . '/notes', ['body' => 'Unauthorized'])->assertNotFound();
+    }
+
+    public function test_notes_are_cleared_by_a_full_task_reset(): void
+    {
+        $task = $this->makeTask($this->member->id, []);
+        $path = '/api/v1/victory/tasks/' . $task->hashed_id . '/notes';
+        $this->withHeaders(['X-API-TOKEN' => $this->member_token])->postJson($path, ['body' => 'Evaluation note'])->assertCreated();
+        $this->assertDatabaseHas('victory_task_notes', ['task_id' => $task->id]);
+        $task->forceDelete();
+        $this->assertDatabaseMissing('victory_task_notes', ['task_id' => $task->id]);
+    }
+
+    public function test_notes_require_task_visibility(): void
+    {
+        $unrelated = $this->makeTask($this->user->id, []);
+        $cu = \App\Models\CompanyUser::where('user_id', $this->member->id)->where('company_id', $this->company->id)->firstOrFail();
+        $cu->permissions = '';
+        $cu->save();
+        $this->withHeaders(['X-API-TOKEN' => $this->member_token])->getJson('/api/v1/victory/tasks/' . $unrelated->hashed_id . '/notes')->assertForbidden();
+        $this->withHeaders(['X-API-TOKEN' => $this->member_token])->postJson('/api/v1/victory/tasks/' . $unrelated->hashed_id . '/notes', ['body' => 'Unauthorized'])->assertForbidden();
+    }
+
     public function test_admin_imports_context_without_replacing_time_or_billing_fields(): void
     {
         $task = $this->makeTask($this->member->id, [[$this->day('2026-11-02', 9), 0, 'running', true]]);

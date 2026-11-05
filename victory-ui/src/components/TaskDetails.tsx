@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import DOMPurify from 'dompurify';
-import { getTask } from '../api/endpoints';
+import { addTaskNote, getTask, getTaskNotes } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { downloadTaskDocument, loadTaskImage, taskDocumentPath } from '../api/documents';
 import type { TaskAttachment } from '../api/types';
@@ -103,6 +103,33 @@ function Attachments({ files }: { files: TaskAttachment[] }) {
   })}</ul>;
 }
 
+function TaskNotes({ taskId }: { taskId: string }) {
+  const client = useQueryClient();
+  const query = useQuery({ queryKey: ['task-notes', taskId], queryFn: () => getTaskNotes(taskId), refetchInterval: 30_000 });
+  const [body, setBody] = useState('');
+  const save = useMutation({ mutationFn: (value: string) => addTaskNote(taskId, value), onSuccess: (note) => {
+    client.setQueryData<Awaited<ReturnType<typeof getTaskNotes>>>(['task-notes', taskId], old => [...(old ?? []).filter(n => n.id !== note.id), note]);
+    setBody('');
+    void client.invalidateQueries({ queryKey: ['task-notes'] });
+  } });
+  return <section aria-label="Notes in Ninja"><h2>Notes in Ninja <span className="n">{query.data?.length ?? 0}</span></h2>
+    {query.isPending && <p role="status">Loading notes…</p>}
+    {query.isError && <p role="alert">Could not load notes. <button type="button" onClick={() => void query.refetch()}>Try again</button></p>}
+    {query.data?.map(note => <article className="task-comment" key={note.id}>
+      <header><strong>{note.author}</strong><time className="sub" dateTime={note.created_at}>{new Date(note.created_at).toLocaleString()}</time></header>
+      <div className="task-note-text">{note.body}</div>
+    </article>)}
+    <form className="task-note-form" onSubmit={e => { e.preventDefault(); if (body.trim() && !save.isPending) save.mutate(body.trim()); }}>
+      <label htmlFor="task-note-body">Add a note</label>
+      <textarea id="task-note-body" rows={4} maxLength={10000} required value={body} disabled={save.isPending} onChange={e => setBody(e.target.value)} />
+      <p className="sub">Notes stay here during evaluation and will be cleared with the final test-data reset.</p>
+      {save.isError && <p role="alert">Could not save your note. {errorMessage(save.error)} Your draft is still here.</p>}
+      <button className="btn" type="submit" disabled={!body.trim() || save.isPending}>{save.isPending ? 'Saving…' : 'Add note'}</button>
+      {save.isSuccess && <p role="status">Note saved in Ninja.</p>}
+    </form>
+  </section>;
+}
+
 export function TaskDetails({ taskId }: { taskId: string }) {
   const root = useRef<HTMLDivElement>(null);
   const query = useQuery({ queryKey: ['task', taskId], queryFn: () => getTask(taskId) });
@@ -124,7 +151,7 @@ export function TaskDetails({ taskId }: { taskId: string }) {
     const keydown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { e.preventDefault(); closeTask(); }
       if (e.key !== 'Tab') return;
-      const targets = root.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), [tabindex="0"]');
+      const targets = root.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), textarea:not([disabled]), [tabindex="0"]');
       const first = targets?.[0];
       const last = targets?.[targets.length - 1];
       if (!first || !last) { e.preventDefault(); return; }
@@ -139,7 +166,10 @@ export function TaskDetails({ taskId }: { taskId: string }) {
     <div className="task-details" role="dialog" aria-modal="true" aria-labelledby="task-detail-title" tabIndex={-1} ref={root}>
       <header className="task-detail-head">
         <div><p className="sub">Task details{content?.section || parsed.section ? ` · ${content?.section || parsed.section}` : ''}</p><h1 id="task-detail-title">{title}</h1></div>
-        <button type="button" className="btn ghost" onClick={closeTask} aria-label="Close task details">Close ×</button>
+        <div className="task-detail-actions">
+          {task && <button type="button" className="btn ghost" onClick={() => document.getElementById('task-note-body')?.focus()}>Write a note</button>}
+          <button type="button" className="btn ghost" onClick={closeTask} aria-label="Close task details">Close ×</button>
+        </div>
       </header>
       {query.isPending && <p role="status">Loading task details…</p>}
       {query.isError && <p role="alert">Could not load this task. {errorMessage(query.error)} <button type="button" onClick={() => void query.refetch()}>Try again</button></p>}
@@ -172,8 +202,9 @@ export function TaskDetails({ taskId }: { taskId: string }) {
           </article>)}
           {!content && <p className="sub">Conversation history has not been imported for this task yet.</p>}
           {content && !content.comments.length && <p className="sub">No comments in Avaza.</p>}
-          {source && <p className="sub">Imported from Avaza. Continue the conversation <a href={source} target="_blank" rel="noopener noreferrer">in the original task</a> during evaluation.</p>}
+          {source && <p className="sub">Avaza history · <a href={source} target="_blank" rel="noopener noreferrer">View original task</a></p>}
         </section>
+        <TaskNotes key={taskId} taskId={taskId} />
       </div>}
     </div>
   </div>;

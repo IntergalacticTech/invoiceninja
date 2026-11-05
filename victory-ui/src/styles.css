@@ -50,6 +50,7 @@ body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font-body)
 .task-detail-head .sub { margin: 0 0 6px; }
 .task-detail-head h1 { margin: 0; font: 700 25px/1.25 var(--font-display); }
 .task-detail-head button { flex: none; }
+.task-detail-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .task-detail-body { padding: 8px 28px 32px; }
 .task-detail-body section { padding-block: 20px; border-bottom: 1px solid var(--rule); }
 .task-detail-body h2 { margin: 0 0 14px; font-size: 17px; }
@@ -69,6 +70,11 @@ body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font-body)
 .task-comment { padding: 18px 0; border-bottom: 1px solid var(--rule); }
 .task-comment > header { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .task-comment blockquote { border-left: 3px solid var(--rule); padding: 8px 12px; margin: 8px 0; background: var(--bg); }
+.task-note-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-note-form { display: grid; gap: 10px; margin-top: 18px; }
+.task-note-form textarea { width: 100%; resize: vertical; min-height: 110px; padding: 12px; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--rule); border-radius: 6px; }
+.task-note-form .sub { margin: 0; }
+.task-note-form .btn { justify-self: start; }
 @media (max-width: 600px) { .task-detail-head { padding: 16px; } .task-detail-body { padding-inline: 16px; } .task-detail-head h1 { font-size: 21px; } }
 
 /* top bar */
