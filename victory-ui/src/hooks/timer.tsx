@@ -111,11 +111,16 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     [qc],
   );
 
-  /** Serialise timer operations so double clicks cannot start two timers. */
+  /**
+   * Serialise timer operations so double clicks cannot start two timers.
+   * A quiet operation (the note save) still queues but does not mark the timer busy: it starts on
+   * blur, which fires on mousedown, and a busy flag would disable the Stop or play button under
+   * the pointer before mouseup, so the click would never arrive and the timer would keep running.
+   */
   const run = useCallback(
-    (op: () => Promise<string[]>): Promise<void> => {
+    (op: () => Promise<string[]>, { quiet = false }: { quiet?: boolean } = {}): Promise<void> => {
       const next = queue.current.then(async () => {
-        setBusyCount((n) => n + 1);
+        if (!quiet) setBusyCount((n) => n + 1);
         let touched: string[] = [];
         try {
           touched = await op();
@@ -123,7 +128,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
           notify(errorMessage(error));
           touched = runningRef.current ? [runningRef.current.task.project_id] : [];
         } finally {
-          setBusyCount((n) => n - 1);
+          if (!quiet) setBusyCount((n) => n - 1);
           refreshAfter(touched);
         }
       });
@@ -247,7 +252,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
         const log = withEntryNote(parseTimeLog(fresh.time_log), current.start, noteRef.current.trim());
         if (log) upsert(await putTimeLog(fresh.id, serializeTimeLog(log)));
         return [];
-      }),
+      }, { quiet: true }),
     [run, upsert],
   );
 

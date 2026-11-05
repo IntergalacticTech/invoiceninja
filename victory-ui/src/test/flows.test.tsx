@@ -1,11 +1,12 @@
 import { screen, waitFor, within } from '@testing-library/react';
+import { http, passthrough } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import { handleOAuthCallback } from '../auth/oauthCallback';
 import { browser } from '../browser';
 import { TOKEN_KEY } from '../config';
 import { parseLog } from '../mocks/db';
 import { renderApp } from './render';
-import { getDb, writes } from './server';
+import { getDb, requests, server, writes } from './server';
 
 describe('sign-in', () => {
   it('exchanges the OIDC code, stores the token and removes the code from the URL', async () => {
@@ -86,6 +87,37 @@ describe('timer', () => {
     const log = parseLog(getDb().tasks.find((t) => t.id === 't_3')?.time_log ?? '');
     expect(log).toHaveLength(before);
     expect(log.at(-1)?.[1]).not.toBe(0);
+  });
+
+  it('stops when Stop is pressed while the note is still saving (blur fires on mousedown)', async () => {
+    // A real browser re-renders between mousedown and mouseup. The blur on mousedown starts the
+    // note save; if that disabled the button, the click would never fire and the timer would run on.
+    let releaseSave: () => void = () => undefined;
+    const saveHeld = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    server.use(
+      http.get('*/api/v1/tasks/:id', async () => {
+        await saveHeld;
+        return passthrough();
+      }),
+    );
+
+    const { user } = renderApp({ as: 'u_sam', hash: '#/projects/p_asl' });
+    await user.click(await screen.findByRole('button', { name: /Start timer on Crimson SoCal/ }, { timeout: 5000 }));
+    await waitFor(() => expect(parseLog(getDb().tasks.find((t) => t.id === 't_3')?.time_log ?? '').at(-1)?.[1]).toBe(0));
+
+    await user.type(screen.getByRole('textbox', { name: 'Note for this time entry' }), 'Margin review');
+    const stopButton = screen.getByRole('button', { name: 'Stop' });
+    await user.pointer({ keys: '[MouseLeft>]', target: stopButton });
+    await waitFor(() => expect(requests.some((r) => r.method === 'GET' && r.path === '/tasks/t_3')).toBe(true));
+    expect(stopButton).toBeEnabled();
+    await user.pointer({ keys: '[/MouseLeft]', target: stopButton });
+    releaseSave();
+
+    await waitFor(() => expect(parseLog(getDb().tasks.find((t) => t.id === 't_3')?.time_log ?? '').at(-1)?.[1]).not.toBe(0));
+    expect(parseLog(getDb().tasks.find((t) => t.id === 't_3')?.time_log ?? '').at(-1)?.[2]).toBe('Margin review');
+    expect(writes().some((r) => r.path === '/tasks/t_3' && r.search.get('stop') === 'true')).toBe(true);
   });
 });
 
