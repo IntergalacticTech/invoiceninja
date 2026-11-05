@@ -1,11 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import DOMPurify from 'dompurify';
 import { getTask } from '../api/endpoints';
 import { errorMessage } from '../api/client';
+import { downloadTaskDocument, loadTaskImage, taskDocumentPath } from '../api/documents';
 import type { TaskAttachment } from '../api/types';
 import { parseDescription } from '../domain/workItems';
 import { closeTask } from '../router';
+import { notify } from '../toasts';
 
 export function safeTaskUrl(value: string): string | undefined {
   if (!value.trim()) return undefined;
@@ -17,6 +19,8 @@ export function safeTaskUrl(value: string): string | undefined {
 
 /** Imported HTML is untrusted, including ordinary task descriptions created through the API. */
 export function RichTaskText({ html }: { html: string }) {
+  const root = useRef<HTMLDivElement>(null);
+  const markup = useMemo(() => {
   const clean = DOMPurify.sanitize(html, {
     ALLOWED_TAGS: ['p', 'br', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 's', 'ul', 'ol', 'li', 'a', 'img', 'blockquote', 'pre', 'code', 'h1', 'h2', 'h3', 'h4', 'table', 'thead', 'tbody', 'tr', 'td', 'th', 'hr'],
     ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'colspan', 'rowspan'],
@@ -32,10 +36,54 @@ export function RichTaskText({ html }: { html: string }) {
   }
   for (const img of doc.querySelectorAll('img')) {
     const src = safeTaskUrl(img.getAttribute('src') ?? '');
-    if (src) { img.setAttribute('src', src); img.setAttribute('loading', 'lazy'); img.setAttribute('referrerpolicy', 'no-referrer'); }
+    if (src && taskDocumentPath(src)) { img.removeAttribute('src'); img.setAttribute('data-task-document', src); }
+    else if (src) { img.setAttribute('src', src); img.setAttribute('loading', 'lazy'); img.setAttribute('referrerpolicy', 'no-referrer'); }
     else img.remove();
   }
-  return <div className="task-rich" dangerouslySetInnerHTML={{ __html: doc.body.innerHTML }} />;
+  return doc.body.innerHTML;
+  }, [html]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const urls: string[] = [];
+    for (const img of root.current?.querySelectorAll<HTMLImageElement>('img[data-task-document]') ?? []) {
+      void loadTaskImage(img.dataset.taskDocument ?? '', controller.signal).then((blob) => {
+        if (controller.signal.aborted) return;
+        const url = URL.createObjectURL(blob);
+        urls.push(url);
+        img.src = url;
+        const link = document.createElement('a');
+        link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+        img.replaceWith(link); link.append(img);
+      }).catch(() => {
+        if (controller.signal.aborted) return;
+        const label = document.createElement('span');
+        label.className = 'sub'; label.textContent = 'Screenshot could not be loaded.';
+        img.replaceWith(label);
+      });
+    }
+    return () => { controller.abort(); urls.forEach((url) => URL.revokeObjectURL(url)); };
+  }, [markup]);
+  return <div ref={root} className="task-rich" dangerouslySetInnerHTML={{ __html: markup }} onClick={(e) => {
+    const link = (e.target as HTMLElement).closest('a');
+    if (link && taskDocumentPath(link.href)) {
+      e.preventDefault();
+      void downloadTaskDocument(link.href, link.textContent?.trim() || 'attachment').catch((error) => notify(errorMessage(error)));
+    }
+  }} />;
+}
+
+function PrivateTaskImage({ url, name }: { url: string; name: string }) {
+  const [src, setSrc] = useState('');
+  useEffect(() => {
+    const controller = new AbortController();
+    let value = '';
+    void loadTaskImage(url, controller.signal).then((blob) => {
+      if (controller.signal.aborted) return;
+      value = URL.createObjectURL(blob); setSrc(value);
+    }).catch(() => undefined);
+    return () => { controller.abort(); if (value) URL.revokeObjectURL(value); };
+  }, [url]);
+  return src ? <a href={src} target="_blank" rel="noopener noreferrer" aria-label={`Open ${name}`}><img src={src} alt={name} /></a> : null;
 }
 
 function Attachments({ files }: { files: TaskAttachment[] }) {
@@ -44,6 +92,10 @@ function Attachments({ files }: { files: TaskAttachment[] }) {
     const url = safeTaskUrl(file.url);
     if (!url) return <li key={file.id}>{file.name} <span className="sub">File unavailable</span></li>;
     const image = file.type?.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(file.name);
+    if (taskDocumentPath(url)) return <li key={file.id}>
+      {image && <PrivateTaskImage url={url} name={file.name} />}
+      <button type="button" className="task-file-download" onClick={() => void downloadTaskDocument(url, file.name).catch((error) => notify(errorMessage(error)))}>Download {file.name}</button>
+    </li>;
     return <li key={file.id}><a href={url} target="_blank" rel="noopener noreferrer" aria-label={file.name}>
       {image && <img src={url} alt={file.name} loading="lazy" referrerPolicy="no-referrer" />}
       <span>{file.name}</span>
