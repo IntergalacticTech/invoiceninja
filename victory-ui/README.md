@@ -157,6 +157,7 @@ Tests (`src/test`) cover:
 - starting a timer with no copy (creates, then starts) and with my copy
 - the one-running-timer rule
 - stop with the note persisted and the log intact
+- Stop pressed while the note is still saving (blur on mousedown must not disable the button)
 - a status change moving all copies via `tasks/sort` with logs intact
 - no money rendered for an admin whose API returns rates and balances
 - API headers, 429 retry, 422 message, and financial stripping
@@ -166,7 +167,13 @@ Tests (`src/test`) cover:
 - **Tests not yet written** for the Today panel total (including a running entry) and for drag and drop.
   The code exists (`TodayPanel` / `entrySecondsLive` in `components/Tracker.tsx`; `onDrop`/`planMove` in
   `pages/Board.tsx`) but has only been checked through the type checker and by hand-reading.
-- `npm run dev:mock` has not been clicked through in a real browser in this session.
+- **Checked against a real Invoice Ninja** (local, MariaDB, seeded team/projects/tasks; token injected
+  instead of Google sign-in) as a team member and an admin: projects, board, status menu, New task,
+  start/stop with a note, starting a card with no copy, My tasks, Time, Today panel, Admin hand-off, no
+  money shown. This found the Stop bug fixed after `v5.13.49-victory.3` (Stop ignored right after typing
+  a note), so that release still has it. Not checked live: Google sign-in, drag and drop.
+- Project cards count task copies per status (server counts); the board counts cards, so a shared task
+  reads "2 ready" on the card and one card on the board.
 - **Expenses and Clients for non-admins:** omitted for now. Admins get links to the admin app.
 - **Editing time entries** on the Time page: read-only for now.
 - **Timesheets / Reports:** not built. Add them to `src/nav.ts` and the `ROUTES` table in `src/App.tsx`.
