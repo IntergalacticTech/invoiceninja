@@ -16,6 +16,7 @@ export interface MockUser {
 }
 
 export interface MockTask {
+  meta?: import('../api/types').Task['meta'];
   id: string;
   user_id: string;
   assigned_user_id: string;

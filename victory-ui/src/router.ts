@@ -40,3 +40,20 @@ export function navigate(path: string): void {
   const next = href(path);
   if (window.location.hash !== next) window.location.hash = next;
 }
+
+/** A real link: task details can be bookmarked, opened in another tab, or closed with Back. */
+export function taskHref(id: string): string {
+  const [path = '/projects', search = ''] = window.location.hash.replace(/^#/, '').split('?');
+  const query = new URLSearchParams(search);
+  query.set('task', id);
+  return href(`${path}?${query.toString()}`);
+}
+
+export function closeTask(): void {
+  const [path = '/projects', search = ''] = window.location.hash.replace(/^#/, '').split('?');
+  const query = new URLSearchParams(search);
+  query.delete('task');
+  const next = href(`${path}${query.size ? `?${query.toString()}` : ''}`);
+  window.history.replaceState(null, '', next);
+  window.dispatchEvent(new HashChangeEvent('hashchange'));
+}

@@ -15,6 +15,7 @@ import { groupWorkItems, sortForColumn, type WorkItem } from '../domain/workItem
 import { clientName, useClientMap, usePeople, useProjectCounts, useProjectTasks } from '../hooks/queries';
 import { useTimer } from '../hooks/timer';
 import { notify } from '../toasts';
+import { taskHref } from '../router';
 
 type BoardView = 'board' | 'list';
 const VIEW_KEY = 'victory.boardView';
@@ -172,9 +173,12 @@ function TaskCard({
       aria-label={item.title}
       onDragStart={(e) => onDragStart(item, e)}
       onDragEnd={onDragEnd}
+      onClick={(e) => {
+        if (!(e.target as HTMLElement).closest('a, button, input, select')) window.location.hash = taskHref(item.rep.id);
+      }}
     >
       <div className="t">
-        {item.title}
+        <a className="task-open" href={taskHref(item.rep.id)}>{item.title}</a>
         {item.section && <span className="section">{item.section}</span>}
       </div>
       <div className="m">
@@ -229,7 +233,7 @@ function TaskTable({
         {rows.map(({ group, item }) => (
           <tr key={item.key}>
             <td>
-              <div className="t-name">{item.title}</div>
+              <div className="t-name"><a className="task-open" href={taskHref(item.rep.id)}>{item.title}</a></div>
               {item.section && <div className="t-sub">{item.section}</div>}
             </td>
             <td>

@@ -10,7 +10,7 @@ import { doneGroups, idsOf, openGroups, type StatusGroup } from '../domain/statu
 import { groupWorkItems, type WorkItem } from '../domain/workItems';
 import { clientName, useClientMap, useProjectMap, useStatusGroups } from '../hooks/queries';
 import { useTimer } from '../hooks/timer';
-import { href } from '../router';
+import { href, taskHref } from '../router';
 
 function useMyTasks(groups: StatusGroup[], doneLimit: number) {
   const { user } = useSession();
@@ -43,7 +43,7 @@ function Row({ item }: { item: WorkItem }) {
   return (
     <tr>
       <td>
-        <div className="t-name">{item.title}</div>
+        <div className="t-name"><a className="task-open" href={taskHref(item.rep.id)}>{item.title}</a></div>
         {item.section && <div className="t-sub">{item.section}</div>}
       </td>
       <td>

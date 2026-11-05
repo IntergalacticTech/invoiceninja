@@ -123,6 +123,12 @@ class TaskTransformer extends EntityTransformer
     public function transform(Task $task)
     {
         $hide = FinancialVisibility::hidden();
+        $meta = $task->meta?->toArray() ?? [];
+        // Avaza conversations can contain internal team notes. Never include
+        // them in customer-portal serialization.
+        if (!(auth()->user() instanceof User)) {
+            unset($meta['avaza']);
+        }
 
         return [
             'id' => (string) $this->encodePrimaryKey($task->id),
@@ -152,7 +158,7 @@ class TaskTransformer extends EntityTransformer
             'date' => $task->calculated_start_date ?: '',
             'due_date' => $task->due_date ?: '',
             'estimated_duration' => is_null($task->estimated_duration) ? null : (int) $task->estimated_duration,
-            'meta' => $task->meta ?: new \stdClass(),
+            'meta' => $meta ?: new \stdClass(),
             'tags' => $this->transformTags($task),
         ];
     }

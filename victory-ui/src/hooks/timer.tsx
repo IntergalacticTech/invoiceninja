@@ -187,6 +187,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
             description: item.description,
             assigned_user_id: me,
             status_id: item.statusId || undefined,
+            meta: item.copies.find((t) => t.meta?.avaza)?.meta,
           });
         }
         await startTask(copy);
