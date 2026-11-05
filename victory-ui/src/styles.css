@@ -37,6 +37,8 @@
 * { box-sizing: border-box; }
 body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font-body); }
 .wrap { max-width: 1180px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.evaluation-note { background: var(--accent-soft); border-bottom: 1px solid var(--rule); font-size: 13px; }
+.evaluation-note .wrap { padding-block: 8px; }
 
 /* top bar */
 .bar { background: var(--surface); border-bottom: 1px solid var(--rule); }

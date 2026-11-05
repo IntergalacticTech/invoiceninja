@@ -4,6 +4,19 @@ This fork runs https://projects.victorycto.com, replacing Avaza for project
 management, time tracking and invoicing. Status and go-live checklist:
 issue #4. Reporting needs: issue #3.
 
+## Evaluation period
+
+The owner confirmed on 2026-11-05 that the team will evaluate Invoice Ninja
+before switching. Avaza remains the source of truth and the hourly mirror stays
+enabled. Keep real time tracking in Avaza; direct Invoice Ninja test entries may
+be overwritten by an import. `EVALUATION_MODE` in `victory-ui/src/config.ts`
+shows this notice before and after sign-in. Remove it only as part of an approved
+cutover with a final sync, clean reconciliation and the hourly mirror disabled.
+
+The existing timesheet pivots and CSV downloads cover the owner's reporting
+requirements. The one-time archive of 38 projects with no time in 180 days is
+approved independently of cutover; deploy the updated Avaza sync before running it.
+
 ## Server changes (kept small so they rebase onto each upstream release)
 
 | Setting / endpoint | What it does | Code |

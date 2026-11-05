@@ -1,6 +1,9 @@
 /** App-wide switches. Change here, not in components. */
 
-/** Budgeted hours on project cards and the project list. The owner has not decided yet. */
+/** Avaza remains the source of truth while the team evaluates this app. */
+export const EVALUATION_MODE = true;
+
+/** Budgeted hours on project cards and the project list (approved by the owner). */
 export const SHOW_BUDGET_HOURS = true;
 
 /** Invoice Ninja's own React admin app (upstream, untouched). Used for admin-only links. */
