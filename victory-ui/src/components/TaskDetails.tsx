@@ -96,9 +96,13 @@ export function TaskDetails({ taskId }: { taskId: string }) {
           {content.original_status && <div><dt>Avaza status</dt><dd>{content.original_status}</dd></div>}
           {content.assignees?.length ? <div><dt>Assigned to</dt><dd>{content.assignees.join(', ')}</dd></div> : null}
           {content.priority && content.priority !== 'None' && <div><dt>Priority</dt><dd>{content.priority}</dd></div>}
+          {content.start_date && <div><dt>Start date</dt><dd>{content.start_date.slice(0, 10)}</dd></div>}
           {content.due_date && <div><dt>Due date</dt><dd>{content.due_date.slice(0, 10)}</dd></div>}
+          {typeof content.percent_complete === 'number' && <div><dt>Progress</dt><dd>{content.percent_complete}%</dd></div>}
+          {content.completed_at && <div><dt>Completed</dt><dd>{content.completed_at.slice(0, 10)}</dd></div>}
           {content.estimated_hours ? <div><dt>Estimate</dt><dd>{content.estimated_hours} h</dd></div> : null}
           {content.parent_title && <div><dt>Parent task</dt><dd>{content.parent_title}</dd></div>}
+          {content.subtask_count ? <div><dt>Subtasks</dt><dd>{content.subtask_count}</dd></div> : null}
           {content.tags?.length ? <div><dt>Tags</dt><dd>{content.tags.join(', ')}</dd></div> : null}
         </dl>}
         <section aria-label="Task description"><h2>Description</h2>

@@ -152,6 +152,9 @@ export interface AvazaTaskContent {
   due_date?: string;
   estimated_hours?: number;
   parent_title?: string;
+  percent_complete?: number | null;
+  completed_at?: string;
+  subtask_count?: number;
   tags?: string[];
   assignees?: string[];
   comments: TaskComment[];
