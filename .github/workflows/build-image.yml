@@ -89,6 +89,19 @@ jobs:
           cp -r dist/* ../public/
           mv ../public/index.html ../resources/views/react/index.blade.php
 
+      - name: Build the VictoryCTO team app (victory-ui -> public/team)
+        if: hashFiles('victory-ui/package.json') != ''
+        run: |
+          set -euo pipefail
+          cd victory-ui
+          npm ci
+          npm test -- --run
+          npm run build
+          mkdir -p ../public/team
+          cp -r dist/. ../public/team/
+          cd ..
+          rm -rf victory-ui/node_modules victory-ui/dist
+
       - name: Build client-portal assets
         run: |
           npm ci || npm i
