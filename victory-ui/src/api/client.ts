@@ -105,7 +105,7 @@ export function stripFinancials<T>(value: T): T {
 
 export function buildUrl(path: string, query?: Query): string {
   const base = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
-  const url = new URL(`${API_BASE}${path}`, base);
+  const url = new URL(`${API_BASE.replace(/\/$/, '')}/${path.replace(/^\/+/, '')}`, base);
   if (query) {
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
