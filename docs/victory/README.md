@@ -138,3 +138,11 @@ owned timer start/stop, preserving unrelated time and financial fields. Timer
 commands serialize per person and reject a competing running task. During
 Julia evaluation, writable pilot projects carry `custom_value4` equal to
 `julia-workspace-pilot`. Avaza remains the production source until cutover.
+
+Restricted legacy task writes accept only delivery/time fields and keep the
+record's time owner, project and client bindings unchanged. Creating or replacing
+another person's time, moving time-bearing records, and financial edits require
+native application administration. Shared description/status edits use the
+atomic workspace command endpoint. The standalone owned tracker remains
+supported. When financial hiding is enabled, client setting overrides are also
+withheld from non-admin responses; they can contain private rate information.

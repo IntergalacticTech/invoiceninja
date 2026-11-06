@@ -91,6 +91,13 @@ class VictoryProjectAccess
         $project = null;
         if ($request->isMethod('POST') && in_array($path, ['tasks', 'victory/workspace/tasks'], true)) {
             $project = $this->decodePrimaryKey((string) $request->input('project_id', ''));
+            if ($path === 'tasks') {
+                $this->deliveryFields($request);
+                $target = Project::find($project);
+                abort_unless($target && (!$request->has('client_id')
+                    || $this->decodePrimaryKey((string) $request->input('client_id')) === (int) $target->client_id), 403);
+            }
+            abort_unless($this->ownsRequestedTime($request, auth()->id(), null), 403, 'Create tasks in your own time ownership.');
         } elseif ($path === 'tasks/sort' && $request->isMethod('POST')) {
             abort_if($request->input('status_ids', []) !== [], 403);
             $ids = collect($request->input('task_ids', []))->flatten()->map(fn ($id) => $this->decodePrimaryKey((string) $id))->all();
@@ -109,6 +116,19 @@ class VictoryProjectAccess
             $task = Task::find($this->decodePrimaryKey($m[1]));
             abort_unless($task, 404);
             $project = (int) $task->project_id;
+            if (preg_match('#^tasks/[^/]+$#', $path)) {
+                $this->deliveryFields($request);
+                // Legacy full replacement can rewrite time even when time_log is omitted.
+                // Shared text/status edits use the atomic workspace endpoint instead.
+                abort_unless((int) ($task->assigned_user_id ?: $task->user_id) === auth()->id()
+                    && $this->ownsRequestedTime($request, $task->user_id, $task->assigned_user_id),
+                    403, 'Use workspace commands for shared work; time ownership cannot be reassigned here.');
+                foreach (['project_id', 'client_id'] as $field) {
+                    abort_if($request->has($field)
+                        && $this->decodePrimaryKey((string) $request->input($field)) !== (int) $task->{$field},
+                        403, 'Moving a time-bearing record requires application administration.');
+                }
+            }
             if ($request->has('time_log') || $request->boolean('start') || $request->boolean('stop')) {
                 abort_unless((int) ($task->assigned_user_id ?: $task->user_id) === auth()->id(), 403, 'You can only edit your own time.');
             }
@@ -117,5 +137,28 @@ class VictoryProjectAccess
             }
         }
         abort_unless($project && $access->canWrite((int) $project), 403, 'Project contribution permission is required.');
+    }
+
+    private function ownsRequestedTime(Request $request, int $creator, ?int $assigned): bool
+    {
+        if ($request->has('user_id')) {
+            if ($this->decodePrimaryKey((string) $request->input('user_id')) !== $creator) {
+                return false;
+            }
+        }
+        if ($request->has('assigned_user_id')) {
+            $assigned = $this->decodePrimaryKey((string) $request->input('assigned_user_id'));
+        }
+        return (int) ($assigned ?: $creator) === auth()->id();
+    }
+
+    private function deliveryFields(Request $request): void
+    {
+        $allowed = ['project_id', 'client_id', 'description', 'assigned_user_id', 'user_id',
+            'status_id', 'status_order', 'status_sort_order', 'meta', 'time_log', 'start', 'stop',
+            'due_date', 'estimated_duration', 'is_date_based', 'date', 'include',
+            'custom_value1', 'custom_value2', 'custom_value3', 'custom_value4'];
+        abort_if(array_diff(array_keys($request->all()), $allowed) !== [], 403,
+            'Only delivery and owned time fields are available through this project policy.');
     }
 }
