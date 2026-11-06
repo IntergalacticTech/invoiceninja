@@ -45,6 +45,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot()
     {
+        \App\Services\Victory\ProjectAccess::installScopes();
+
         // \DB::listen(function($query) {
         //     nlog(
         //         $query->sql,

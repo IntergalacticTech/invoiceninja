@@ -158,7 +158,7 @@ Route::group(['middleware' => ['throttle:password-reset', 'api_secret_check', 'e
     Route::post('api/v1/reset_password', [ForgotPasswordController::class, 'sendResetLinkEmail']);
 });
 
-Route::group(['middleware' => ['throttle:api', 'token_auth', 'valid_json','locale'], 'prefix' => 'api/v1', 'as' => 'api.'], function () {
+Route::group(['middleware' => ['throttle:api', 'token_auth', \App\Http\Middleware\VictoryProjectAccess::class, 'valid_json','locale'], 'prefix' => 'api/v1', 'as' => 'api.'], function () {
 
     Route::post('password_timeout', PasswordTimeoutController::class)->name('password_timeout');
     Route::put('accounts/{account}', [AccountController::class, 'update'])->name('account.update');
@@ -420,6 +420,14 @@ Route::group(['middleware' => ['throttle:api', 'token_auth', 'valid_json','local
     Route::post('reports/tax_period_report', TaxPeriodReportController::class);
     Route::post('reports/user_sales_report', UserSalesReportController::class);
     Route::post('reports/projects', ProjectReportController::class);
+
+    Route::get('victory/workspace', [\App\Http\Controllers\Victory\WorkspaceController::class, 'index']);
+    Route::get('victory/access/me', [\App\Http\Controllers\Victory\ProjectAccessController::class, 'me']);
+    Route::get('victory/access/users', [\App\Http\Controllers\Victory\ProjectAccessController::class, 'index']);
+    Route::put('victory/access/users/{user}', [\App\Http\Controllers\Victory\ProjectAccessController::class, 'update']);
+
+    Route::post('victory/workspace/tasks', [\App\Http\Controllers\Victory\WorkspaceTaskController::class, 'store']);
+    Route::post('victory/tasks/{task}/workspace', [\App\Http\Controllers\Victory\WorkspaceTaskController::class, 'update']);
 
     // VictoryCTO team app
     Route::get('victory/time_entries', [\App\Http\Controllers\Victory\TimeEntryController::class, 'index'])->name('victory.time_entries')->middleware('throttle:60,1');

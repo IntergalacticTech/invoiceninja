@@ -15,6 +15,7 @@ export interface NavItem {
 }
 
 export const NAV: NavItem[] = [
+  { key: 'workspace', label: 'Workspace', path: '/workspace' },
   { key: 'projects', label: 'Projects', path: '/projects' },
   { key: 'tasks', label: 'My tasks', path: '/tasks' },
   { key: 'time', label: 'Time', path: '/time' },

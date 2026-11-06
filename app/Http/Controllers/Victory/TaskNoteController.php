@@ -56,15 +56,21 @@ class TaskNoteController extends Controller
     public function store(Request $request, Task $task): JsonResponse
     {
         $user = $this->authorizeTask($task);
-        $data = $request->validate(['body' => ['required', 'string', 'max:10000']]);
+        $data = $request->validate(['body' => ['required', 'string', 'max:10000'], 'request_id' => ['sometimes', 'uuid']]);
         $body = trim($data['body']);
         abort_if($body === '', 422);
+        $write = function () use ($user, $task, $body) {
         $timestamp = now('UTC')->format('Y-m-d H:i:s.u');
         $row = (object) ['id' => (string) Str::uuid(), 'company_id' => $user->companyId(), 'task_id' => $task->id,
             'user_id' => $user->id, 'thread_key' => $this->threadKey($task), 'author' => mb_substr(trim($user->name()) ?: 'Team member', 0, 255),
             'body' => $body, 'created_at' => $timestamp, 'updated_at' => $timestamp];
         DB::table('victory_task_notes')->insert((array) $row);
 
-        return response()->json(['data' => $this->present($row)], 201);
+        return $this->present($row);
+        };
+        $result = isset($data['request_id'])
+            ? \App\Services\Victory\WorkspaceCommands::run($data['request_id'], 'task_note:' . $task->hashed_id, $data, $write)
+            : $write();
+        return response()->json(['data' => $result], 201);
     }
 }

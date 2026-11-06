@@ -10,6 +10,7 @@ import { Tracker } from './components/Tracker';
 import { TaskDetails } from './components/TaskDetails';
 import { EVALUATION_MODE } from './config';
 import { TimerProvider } from './hooks/timer';
+import { WorkspacePage } from './pages/WorkspacePage';
 import { MyTasksPage } from './pages/MyTasksPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { ReportsPage } from './pages/ReportsPage';
@@ -19,6 +20,7 @@ import { clearToasts } from './toasts';
 
 /** Route table: first segment -> page. New sections go here and in nav.ts. */
 const ROUTES: Record<string, (r: Route) => ReactNode> = {
+  workspace: () => <WorkspacePage />,
   projects: (r) => <ProjectsPage selectedId={r.segments[1]} />,
   tasks: () => <MyTasksPage />,
   time: (r) => <TimePage week={r.segments[1]} />,
