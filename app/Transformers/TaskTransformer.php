@@ -123,6 +123,7 @@ class TaskTransformer extends EntityTransformer
     public function transform(Task $task)
     {
         $hide = FinancialVisibility::hidden();
+        $hideTime = !app(\App\Services\Victory\ProjectAccess::class)->canReadTime($task);
         $meta = $task->meta?->toArray() ?? [];
         // Avaza conversations can contain internal team notes. Never include
         // them in customer-portal serialization.
@@ -136,7 +137,7 @@ class TaskTransformer extends EntityTransformer
             'assigned_user_id' => (string) $this->encodePrimaryKey($task->assigned_user_id),
             'number' => (string) $task->number ?: '',
             'description' => (string) $task->description ?: '',
-            'duration' => (int) $task->duration ?: 0,
+            'duration' => $hideTime ? 0 : ((int) $task->duration ?: 0),
             'rate' => $hide ? 0.0 : ((float) $task->rate ?: 0),
             'created_at' => (int) $task->created_at,
             'updated_at' => (int) $task->updated_at,
@@ -145,8 +146,8 @@ class TaskTransformer extends EntityTransformer
             'client_id' => $this->encodePrimaryKey($task->client_id) ?: '',
             'project_id' => $this->encodePrimaryKey($task->project_id) ?: '',
             'is_deleted' => (bool) $task->is_deleted,
-            'time_log' => $task->time_log ?: '',
-            'is_running' => (bool) $task->is_running, //@deprecate
+            'time_log' => $hideTime ? '[]' : ($task->time_log ?: ''),
+            'is_running' => $hideTime ? false : (bool) $task->is_running, //@deprecate
             'custom_value1' => $task->custom_value1 ?: '',
             'custom_value2' => $task->custom_value2 ?: '',
             'custom_value3' => $task->custom_value3 ?: '',
@@ -155,7 +156,7 @@ class TaskTransformer extends EntityTransformer
             'status_sort_order' => (int) $task->status_sort_order, //deprecated 5.0.34
             'is_date_based' => (bool) $task->is_date_based,
             'status_order' => is_null($task->status_order) ? null : (int) $task->status_order,
-            'date' => $task->calculated_start_date ?: '',
+            'date' => $hideTime ? '' : ($task->calculated_start_date ?: ''),
             'due_date' => $task->due_date ?: '',
             'estimated_duration' => is_null($task->estimated_duration) ? null : (int) $task->estimated_duration,
             'meta' => $meta ?: new \stdClass(),

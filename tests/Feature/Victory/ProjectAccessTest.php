@@ -162,6 +162,21 @@ class ProjectAccessTest extends TestCase
         $this->assertSame('Test work', $logs[0][2]);
     }
 
+    public function test_direct_reads_and_edit_receipts_hide_another_persons_time(): void
+    {
+        $this->grant();
+        $task = Task::factory()->create(['company_id' => $this->company->id, 'project_id' => $this->project->id,
+            'client_id' => $this->client->id, 'user_id' => $this->user->id, 'assigned_user_id' => $this->user->id,
+            'description' => 'Team work', 'time_log' => '[[100,800,"private work interval",true]]', 'duration' => 700]);
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->getJson('/api/v1/tasks/' . $task->hashed_id)
+            ->assertOk()->assertJsonPath('data.time_log', '[]')->assertJsonPath('data.duration', 0);
+        $this->postJson('/api/v1/victory/tasks/' . $task->hashed_id . '/workspace',
+            ['action' => 'update', 'description' => 'Reviewed team work'])->assertOk()->assertJsonPath('data.time_log', '[]');
+        $this->assertSame('[[100,800,"private work interval",true]]', $task->fresh()->time_log);
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->getJson('/api/v1/tasks/' . $task->hashed_id)
+            ->assertOk()->assertJsonPath('data.time_log', '[[100,800,"private work interval",true]]');
+    }
+
     public function test_create_and_note_retries_return_the_original_effect(): void
     {
         $this->project->custom_value4 = 'julia-workspace-pilot';

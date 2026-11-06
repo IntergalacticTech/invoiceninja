@@ -95,7 +95,8 @@ class WorkspaceTaskController extends Controller
                 }
             }
             return ['id' => $current->hashed_id, 'updated_at' => (int) $current->updated_at,
-                'time_log' => $current->time_log, 'description' => $current->description];
+                'time_log' => app(\App\Services\Victory\ProjectAccess::class)->canReadTime($current) ? $current->time_log : '[]',
+                'description' => $current->description];
         });
         return response()->json(['data' => $result]);
     }
