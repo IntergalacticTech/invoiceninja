@@ -93,12 +93,14 @@ class VictoryProjectAccess
         $creator = $request->has('user_id') ? $this->decodePrimaryKey((string) $request->input('user_id')) : ($task?->user_id ?: $user->id);
         $assigned = $request->has('assigned_user_id') ? $this->decodePrimaryKey((string) $request->input('assigned_user_id')) : $task?->assigned_user_id;
         $owner = (int) ($assigned ?: $creator);
+        $request->attributes->set('victory_original_time_owner', $task ? (int) ($task->assigned_user_id ?: $task->user_id) : null);
         CompanyUser::where('company_id', $user->companyId())->where('user_id', $owner)->lockForUpdate()->firstOrFail();
         $log = $request->input('time_log', []);
         $log = is_string($log) ? json_decode($log, true) : $log;
-        $running = is_array($log) && collect($log)->contains(fn ($entry) => is_array($entry)
-            && isset($entry[0]) && (int) ($entry[1] ?? 0) === 0);
-        if ($request->boolean('start') || $request->boolean('is_running') || $request->input('action') === 'start' || $running) {
+        $running = is_array($log) ? collect($log)->filter(fn ($entry) => is_array($entry)
+            && isset($entry[0]) && (int) ($entry[1] ?? 0) === 0)->count() : 0;
+        abort_if($running > 1, 422, 'Only one running interval is allowed.');
+        if ($request->boolean('start') || $request->boolean('is_running') || in_array($request->input('action'), ['start', 'resume'], true) || $running) {
             \App\Services\Victory\WorkspaceCommands::requireNoCompetingTimer($user->companyId(), $owner, $task?->id);
         }
     }

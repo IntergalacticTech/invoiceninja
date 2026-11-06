@@ -270,6 +270,14 @@ class TaskController extends BaseController
      */
     public function update(UpdateTaskRequest $request, Task $task)
     {
+        $workspacePolicy = config('ninja.victory_project_access_enabled', false);
+        if ($workspacePolicy && $request->attributes->has('victory_original_time_owner')) {
+            // Current read after the owner lock: do not reuse a repeatable-read
+            // snapshot or a model bound before a competing timer committed.
+            $task = Task::where('company_id', auth()->user()->companyId())->lockForUpdate()->findOrFail($task->id);
+            abort_unless((int) ($task->assigned_user_id ?: $task->user_id) === $request->attributes->get('victory_original_time_owner'),
+                409, 'Time ownership changed. Refresh before updating this task.');
+        }
         if ($request->entityIsDeleted($task)) {
             return $request->disallowUpdate();
         }
@@ -283,7 +291,17 @@ class TaskController extends BaseController
             $task = $this->task_repo->save($request_data, $task);
         } else {
 
-            $task = $this->task_repo->triggeredActions($request, $task);
+            if ($workspacePolicy) {
+                \App\Services\Victory\WorkspaceCommands::normalizeRunningInterval($task);
+                if ($request->input('start') == 'true') {
+                    $task = $this->task_repo->start($task);
+                }
+                if ($request->input('stop') == 'true') {
+                    $task = $this->task_repo->stop($task);
+                }
+            } else {
+                $task = $this->task_repo->triggeredActions($request, $task);
+            }
 
             /*
             *
@@ -302,6 +320,10 @@ class TaskController extends BaseController
             $task = $this->task_repo->save($request_data, $task);
         }
 
+        if ($workspacePolicy && $request->attributes->has('victory_original_time_owner')) {
+            \App\Services\Victory\WorkspaceCommands::normalizeRunningInterval($task);
+        }
+
         if (is_null($task->status_order) || $task->status_order != $old_task_status_order) {
             $this->task_repo->sortStatuses($task);
         }
@@ -310,7 +332,9 @@ class TaskController extends BaseController
 
         event('eloquent.updated: App\Models\Task', $task);
 
-        return $this->itemResponse($task->fresh());
+        return $this->itemResponse($workspacePolicy && $request->attributes->has('victory_original_time_owner')
+            ? Task::where('company_id', auth()->user()->companyId())->lockForUpdate()->findOrFail($task->id)
+            : $task->fresh());
     }
 
     /**
@@ -405,7 +429,13 @@ class TaskController extends BaseController
         $user = auth()->user();
 
         $task = $this->task_repo->save($request->all(), TaskFactory::create($user->company()->id, $user->id));
+        if (config('ninja.victory_project_access_enabled', false) && $request->attributes->has('victory_original_time_owner')) {
+            \App\Services\Victory\WorkspaceCommands::normalizeRunningInterval($task);
+        }
         $task = $this->task_repo->triggeredActions($request, $task);
+        if (config('ninja.victory_project_access_enabled', false) && $request->attributes->has('victory_original_time_owner')) {
+            \App\Services\Victory\WorkspaceCommands::normalizeRunningInterval($task);
+        }
 
         event(new TaskWasCreated($task, $task->company, Ninja::eventVars($user->id)));
 

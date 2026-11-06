@@ -15,13 +15,29 @@ class WorkspaceCommands
             ->when($exceptTaskId, fn ($q) => $q->where('id', '!=', $exceptTaskId))->where('is_deleted', false)
             ->where(fn ($q) => $q->where('assigned_user_id', $ownerId)
                 ->orWhere(fn ($q) => $q->where(fn ($q) => $q->whereNull('assigned_user_id')->orWhere('assigned_user_id', 0))
-                    ->where('user_id', $ownerId)))->get(['time_log']);
+                    ->where('user_id', $ownerId)))->lockForUpdate()->get(['time_log']);
         foreach ($others as $other) {
             foreach (json_decode($other->time_log ?: '[]', true) ?: [] as $entry) {
                 abort_if(isset($entry[0]) && (int) ($entry[1] ?? 0) === 0, 409,
                     'Stop the running timer before starting another.');
             }
         }
+    }
+
+    /** Keep the sole active interval last without changing any interval values. */
+    public static function normalizeRunningInterval(\App\Models\Task $task): \App\Models\Task
+    {
+        $logs = json_decode($task->time_log ?: '[]', true) ?: [];
+        $active = array_keys(array_filter($logs, fn ($entry) => is_array($entry)
+            && isset($entry[0]) && (int) ($entry[1] ?? 0) === 0));
+        abort_if(count($active) > 1, 409, 'Multiple running intervals need review in Time before tracking more work.');
+        if ($active && $active[0] !== count($logs) - 1) {
+            $entry = array_splice($logs, $active[0], 1)[0];
+            $logs[] = $entry;
+            $task->time_log = json_encode($logs);
+            $task->saveQuietly();
+        }
+        return $task;
     }
 
     public static function run(string $requestId, string $operation, array $payload, Closure $work): array
