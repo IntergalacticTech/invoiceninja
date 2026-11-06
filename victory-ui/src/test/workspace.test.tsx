@@ -55,4 +55,19 @@ describe('shared workspace', () => {
     expect(host.action).toHaveBeenCalledWith('t1', { action: 'update', description: 'Reviewed next step', expected_updated_at: 100 });
   });
 
+  it('preserves an unsaved draft and its original version across a live refresh', async () => {
+    const host = makeHost(); const user = userEvent.setup();
+    render(<Workspace host={host} initialTaskId="t1" />);
+    const detail = within(await screen.findByRole('region', { name: 'Task details' }));
+    await user.clear(detail.getByRole('textbox', { name: /^Description$/ }));
+    await user.type(detail.getByRole('textbox', { name: /^Description$/ }), 'My unsaved draft');
+    const original = snapshot.tasks[0]; if (!original) throw new Error('Missing task fixture');
+    vi.mocked(host.load).mockResolvedValue({ ...snapshot, tasks: [{ ...original, description: 'Changed by a teammate', updated_at: 101 }] });
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(detail.getByRole('heading', { level: 2 })).toHaveTextContent('Changed by a teammate'));
+    expect(detail.getByRole('textbox', { name: /^Description$/ })).toHaveValue('My unsaved draft');
+    await user.click(detail.getByRole('button', { name: 'Save description' }));
+    expect(host.action).toHaveBeenCalledWith('t1', { action: 'update', description: 'My unsaved draft', expected_updated_at: 100 });
+  });
+
 });
