@@ -52,6 +52,10 @@ function TaskPanel({ task, project, data, host, run, onClose, commandBusy }: { t
   const [note, setNote] = useState('');
   const [noteRequestId, setNoteRequestId] = useState(() => crypto.randomUUID());
   const [description, setDescription] = useState(task.description);
+  const [editVersion, setEditVersion] = useState(task.updated_at);
+  useEffect(() => {
+    if (description === task.description) setEditVersion(task.updated_at);
+  }, [description, task.description, task.updated_at]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -66,7 +70,8 @@ function TaskPanel({ task, project, data, host, run, onClose, commandBusy }: { t
     <h2>{title(task)}</h2><p className="jw-muted">{task.own ? 'Assigned to you' : task.assignee || 'Team task'} · {hours(task.seconds)} recorded</p>
     <label>Status<select aria-label="Status" value={task.status_id} disabled={!project.writable || busy || commandBusy} onChange={e => void run(() => host.action(task.id, { action: 'update', status_id: e.target.value, expected_updated_at: task.updated_at }))}>{data.statuses.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
     <label>Description<textarea aria-label="Description" rows={5} value={description} disabled={!project.writable} onChange={e => setDescription(e.target.value)} /></label>
-    {project.writable && description !== task.description && <button className="jw-secondary" disabled={busy || commandBusy} onClick={() => void run(() => host.action(task.id, { action: 'update', description, expected_updated_at: task.updated_at }))}>Save description</button>}
+    {project.writable && description !== task.description && <button className="jw-secondary" disabled={busy || commandBusy} onClick={() => void run(() => host.action(task.id, { action: 'update', description, expected_updated_at: editVersion }))}>Save description</button>}
+    {description !== task.description && editVersion !== task.updated_at && <div className="jw-readonly"><p>This task changed while you were editing. Your draft has been kept.</p><details><summary>See the current description</summary><p>{task.description}</p></details><button className="jw-secondary" onClick={() => { setDescription(task.description); setEditVersion(task.updated_at); }}>Use current description</button></div>}
     {host.ask && <button className="jw-ask" onClick={() => host.ask?.(`Help me work on task ${task.id}: ${title(task)}. Project ${project.id}. Check my permissions and the current record before acting.`)}><Icon name="spark" /> Work through this with Julia</button>}
     <h3>Conversation</h3>
     {loading && <p role="status" className="jw-muted">Loading notes…</p>}
