@@ -25,6 +25,9 @@ concurrency:
 jobs:
   team-app:
     name: Team app (victory-ui)
+    env:
+      VITE_MUI_X_LICENSE_KEY: ${{ secrets.MUI_X_LICENSE_KEY }}
+      MUI_X_TELEMETRY_DISABLED: "1"
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -119,4 +122,5 @@ jobs:
             tests/Feature/Auth/OidcOnlyTest.php \
             tests/Feature/FinancialVisibilityTest.php \
             tests/Feature/Victory/EvaluationMailTest.php \
+            tests/Feature/Victory/EvaluationFeedbackTest.php \
             tests/Feature/Victory

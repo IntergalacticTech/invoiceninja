@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Client, Project, TimeEntry } from '../api/types';
 import { useSession } from '../auth/session';
 import { SHOW_BUDGET_HOURS } from '../config';
@@ -17,8 +17,7 @@ import {
   useProjects,
   useStatusGroups,
 } from '../hooks/queries';
-import { navigate } from '../router';
-import { ProjectBoard } from './Board';
+import { navigate, projectHref } from '../router';
 
 interface Stats {
   seconds: number;
@@ -201,7 +200,7 @@ function QuietRow({ row, groups, onSelect }: { row: Row; groups: StatusGroup[]; 
   );
 }
 
-export function ProjectsPage({ selectedId }: { selectedId?: string }) {
+export function ProjectsPage() {
   const session = useSession();
   const { canAdmin, user } = session;
   const projectsQ = useProjects();
@@ -251,18 +250,9 @@ export function ProjectsPage({ selectedId }: { selectedId?: string }) {
 
   const recent = rows.filter((r) => r.stats.seconds > 0);
   const quiet = rows.filter((r) => !(r.stats.seconds > 0));
-  const selected =
-    (projectsQ.data ?? []).find((p) => p.id === selectedId) ?? recent[0]?.project ?? rows[0]?.project ?? undefined;
   const hours = hoursOf(recent.reduce((sum, r) => sum + r.stats.seconds, 0));
 
-  const onSelect = (id: string) => navigate(`/projects/${id}`);
-
-  useEffect(() => {
-    if (!selectedId) return;
-    const el = document.getElementById('board-sec');
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    el?.scrollIntoView?.({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
-  }, [selectedId]);
+  const onSelect = (id: string) => { const project = projectsQ.data?.find(p => p.id === id); if (project) navigate(projectHref(project)); };
 
   const summary = canAdmin
     ? `${rows.length} active projects · ${recent.length} worked on in the last 30 days · ${fmtH(hours)} hours logged`
@@ -345,7 +335,7 @@ export function ProjectsPage({ selectedId }: { selectedId?: string }) {
                     key={row.project.id}
                     row={row}
                     groups={groups}
-                    selected={row.project.id === selected?.id}
+                    selected={false}
                     nameOf={nameOf}
                     onSelect={onSelect}
                   />
@@ -360,7 +350,7 @@ export function ProjectsPage({ selectedId }: { selectedId?: string }) {
                 key={row.project.id}
                 row={row}
                 groups={groups}
-                selected={row.project.id === selected?.id}
+                selected={false}
                 nameOf={nameOf}
                 onSelect={onSelect}
               />
@@ -375,7 +365,6 @@ export function ProjectsPage({ selectedId }: { selectedId?: string }) {
         )}
       </section>
 
-      {selected && groups.length > 0 && <ProjectBoard key={selected.id} project={selected} groups={groups} />}
 
       {layout === 'cards' && quiet.length > 0 && (
         <section aria-labelledby="h-quiet">

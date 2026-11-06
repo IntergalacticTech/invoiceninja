@@ -55,6 +55,8 @@ jobs:
       contents: write # create the release + upload the asset
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
+      VITE_MUI_X_LICENSE_KEY: ${{ secrets.MUI_X_LICENSE_KEY }}
+      MUI_X_TELEMETRY_DISABLED: "1"
     outputs:
       tag: ${{ inputs.tag || github.ref_name }}
     steps:

@@ -18,7 +18,7 @@ export async function handleOAuthCallback(): Promise<{ handled: boolean; error?:
   const code = params.get('code');
   const providerError = params.get('error');
 
-  browser.replaceUrl(`${import.meta.env.BASE_URL}#/projects`);
+  browser.replaceUrl('/projects');
 
   if (providerError) return { handled: true, error: 'Sign-in was cancelled or failed. Please try again.' };
   if (!code) return { handled: true, error: 'The sign-in link was incomplete. Please try again.' };

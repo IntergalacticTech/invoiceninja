@@ -6,6 +6,7 @@ import {
   getClients,
   getProjects,
   getTaskStatuses,
+  getProjectWorkflow,
   getTimeEntries,
   getUsers,
   listTasks,
@@ -69,8 +70,8 @@ export function usePeople(extraTasks: Task[] = []): (id: string) => string {
   }, [data, extraTasks, user]);
 }
 
-export function useStatusGroups(): { groups: StatusGroup[]; isPending: boolean } {
-  const q = useQuery({ queryKey: ['task_statuses'], queryFn: getTaskStatuses, staleTime: FIVE_MIN });
+export function useStatusGroups(projectId?: string): { groups: StatusGroup[]; isPending: boolean } {
+  const q = useQuery({ queryKey: ['task_statuses', projectId ?? 'all'], queryFn: () => projectId ? getProjectWorkflow(projectId).then(r => r.statuses) : getTaskStatuses(), staleTime: FIVE_MIN });
   const groups = useMemo(() => buildStatusGroups(q.data ?? []), [q.data]);
   return { groups, isPending: q.isPending };
 }
@@ -106,26 +107,26 @@ export function useMyRecentTasks() {
   });
 }
 
-export function useProjectTasks(projectId: string | undefined, groups: StatusGroup[], doneLimit: number) {
+export function useProjectTasks(projectId: string | undefined, groups: StatusGroup[], doneLimit: number, search = '') {
   const openIds = idsOf(openGroups(groups)).join(',');
   const doneIds = idsOf(doneGroups(groups)).join(',');
   const enabled = Boolean(projectId) && groups.length > 0;
 
   const open = useQuery({
-    queryKey: ['tasks', 'project', projectId, 'open', openIds],
+    queryKey: ['tasks', 'project', projectId, 'open', openIds, ...(typeof search === 'string' && search ? [search] : [])],
     queryFn: () =>
       openIds
-        ? listTasks({ project_tasks: projectId, task_status: openIds, include: 'assigned_user', sort: 'status_order|asc' })
+        ? listTasks({ project_tasks: projectId, task_status: openIds, include: 'assigned_user', sort: 'status_order|asc', filter: search })
         : Promise.resolve([] as Task[]),
     enabled,
     staleTime: 30 * 1000,
   });
 
   const done = useQuery({
-    queryKey: ['tasks', 'project', projectId, 'done', doneIds, doneLimit],
+    queryKey: ['tasks', 'project', projectId, 'done', doneIds, doneLimit, search],
     queryFn: () =>
       doneIds
-        ? listTasksPage({ project_tasks: projectId, task_status: doneIds, include: 'assigned_user', sort: 'updated_at|desc' }, doneLimit)
+        ? listTasksPage({ project_tasks: projectId, task_status: doneIds, include: 'assigned_user', sort: 'updated_at|desc', filter: search }, doneLimit)
         : Promise.resolve({ data: [] as Task[], meta: undefined }),
     enabled,
     staleTime: 30 * 1000,

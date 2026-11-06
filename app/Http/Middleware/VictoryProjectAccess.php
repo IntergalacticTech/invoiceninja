@@ -111,6 +111,11 @@ class VictoryProjectAccess
         $includes = array_filter(explode(',', (string) $request->input('include', '')));
         abort_if(array_diff($includes, ['client', 'assigned_user', 'company_user']), 403, 'This relation is not available.');
         if ($request->isMethod('GET')) {
+            if (preg_match('#^victory/projects/([^/]+)/(people|workflow)$#', $path, $match)) {
+                abort_unless(Project::find($this->decodePrimaryKey($match[1])), 404);
+                return;
+            }
+            if ($path === 'victory/expenses') return;
             if (preg_match('#^documents/([^/]+)/download$#', $path, $match)) {
                 $document = Document::where('company_id', $access->companyId)->find($this->decodePrimaryKey($match[1]));
                 abort_unless($document && $document->documentable_type === Task::class
@@ -127,6 +132,7 @@ class VictoryProjectAccess
         if ($request->isMethod('POST') && $path === 'refresh_react') {
             return;
         }
+        if ($request->isMethod('POST') && $path === 'victory/expenses') return;
         $project = null;
         if ($request->isMethod('POST') && in_array($path, ['tasks', 'victory/workspace/tasks'], true)) {
             $project = $this->decodePrimaryKey((string) $request->input('project_id', ''));
@@ -150,7 +156,7 @@ class VictoryProjectAccess
                 abort_unless(TaskStatus::where('company_id', $access->companyId)->where('id', $this->decodePrimaryKey((string) $status))->exists(), 422);
             }
             return;
-        } elseif (preg_match('#^(?:victory/)?tasks/([^/]+)(?:/(notes|workspace))?$#', $path, $m)
+        } elseif (preg_match('#^(?:victory/)?tasks/([^/]+)(?:/(notes|workspace|workflow))?$#', $path, $m)
             && in_array($request->method(), ['POST', 'PUT', 'PATCH'], true)) {
             $task = Task::find($this->decodePrimaryKey($m[1]));
             abort_unless($task, 404);

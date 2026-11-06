@@ -7,7 +7,7 @@ import { useSession } from '../auth/session';
 import { DONE_PAGE_SIZE, SHOW_BUDGET_HOURS } from '../config';
 import { People } from '../components/Avatar';
 import { PlayButton } from '../components/PlayButton';
-import { Seg } from '../components/Seg';
+import { TaskFilters, emptyTaskFilters, filterWorkItems, useTaskLayout } from '../components/TaskFilters';
 import { StatusMenu } from '../components/StatusMenu';
 import { ago, fmtH, hoursOf } from '../domain/dates';
 import { groupOf, type StatusGroup } from '../domain/statuses';
@@ -15,18 +15,7 @@ import { groupWorkItems, sortForColumn, type WorkItem } from '../domain/workItem
 import { clientName, useClientMap, usePeople, useProjectCounts, useProjectTasks } from '../hooks/queries';
 import { useTimer } from '../hooks/timer';
 import { notify } from '../toasts';
-import { taskHref } from '../router';
-
-type BoardView = 'board' | 'list';
-const VIEW_KEY = 'victory.boardView';
-
-function readView(): BoardView {
-  try {
-    return window.localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'board';
-  } catch {
-    return 'board';
-  }
-}
+import { navigate, taskHref } from '../router';
 
 /**
  * Plan a move for POST /tasks/sort. Every copy of the moved card goes to the target column's
@@ -145,7 +134,7 @@ function NewTaskForm({ project, groups, onDone }: { project: Project; groups: St
   );
 }
 
-function TaskCard({
+export function TaskCard({
   item,
   groups,
   nameOf,
@@ -174,7 +163,7 @@ function TaskCard({
       onDragStart={(e) => onDragStart(item, e)}
       onDragEnd={onDragEnd}
       onClick={(e) => {
-        if (!(e.target as HTMLElement).closest('a, button, input, select')) window.location.hash = taskHref(item.rep.id);
+        if (!(e.target as HTMLElement).closest('a, button, input, select')) navigate(taskHref(item.rep.id));
       }}
     >
       <div className="t">
@@ -192,7 +181,7 @@ function TaskCard({
   );
 }
 
-function TaskTable({
+export function TaskTable({
   columns,
   nameOf,
   groups,
@@ -262,26 +251,20 @@ function TaskTable({
 
 export function ProjectBoard({ project, groups }: { project: Project; groups: StatusGroup[] }) {
   const clients = useClientMap();
-  const [view, setViewState] = useState<BoardView>(readView);
-  const setView = (v: BoardView) => {
-    setViewState(v);
-    try {
-      window.localStorage.setItem(VIEW_KEY, v);
-    } catch {
-      /* ignore */
-    }
-  };
+  const { view, setView } = useTaskLayout();
+  const [filters, setFilters] = useState({ ...emptyTaskFilters });
   const [doneLimit, setDoneLimit] = useState(DONE_PAGE_SIZE);
   const [creating, setCreating] = useState(false);
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
 
-  const data = useProjectTasks(project.id, groups, doneLimit);
+  const data = useProjectTasks(project.id, groups, doneLimit, filters.search);
   const nameOf = usePeople(data.tasks);
   const counts = useProjectCounts(project.id, groups);
   const move = useMoveItem(project.id);
 
-  const items = useMemo(() => groupWorkItems(data.tasks), [data.tasks]);
+  const allItems = useMemo(() => groupWorkItems(data.tasks), [data.tasks]);
+  const items = useMemo(() => filterWorkItems(allItems, filters), [allItems, filters]);
   const columns = useMemo(
     () =>
       groups.map((group) => ({
@@ -331,21 +314,13 @@ export function ProjectBoard({ project, groups }: { project: Project; groups: St
           </p>
         </div>
         <div className="board-tools">
-          <Seg
-            label="Task layout"
-            value={view}
-            onChange={setView}
-            options={[
-              { value: 'board', label: 'Board' },
-              { value: 'list', label: 'List' },
-            ]}
-          />
           <button type="button" className="btn" onClick={() => setCreating(true)} aria-expanded={creating}>
             New task
           </button>
         </div>
       </div>
 
+      <TaskFilters value={filters} onChange={setFilters} groups={groups} items={allItems} nameOf={nameOf} view={view} onView={setView} />
       {creating && <NewTaskForm project={project} groups={groups} onDone={() => setCreating(false)} />}
 
       {data.isError && <p className="sub" role="alert">The tasks for this project could not be loaded.</p>}

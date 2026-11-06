@@ -56,21 +56,33 @@ class TaskNoteController extends Controller
     public function store(Request $request, Task $task): JsonResponse
     {
         $user = $this->authorizeTask($task);
-        $data = $request->validate(['body' => ['required', 'string', 'max:10000'], 'request_id' => ['sometimes', 'uuid']]);
+        $data = $request->validate(['body' => ['required', 'string', 'max:10000'], 'request_id' => ['sometimes', 'uuid'],
+            'mentions' => ['sometimes', 'array', 'max:25'], 'mentions.*' => ['required', 'string', 'distinct']]);
         $body = trim($data['body']);
         abort_if($body === '', 422);
-        $write = function () use ($user, $task, $body) {
+        $mentions = collect($data['mentions'] ?? []);
+        $recipients = $task->project ? \App\Services\Victory\ProjectPeople::users($task->project)->filter(fn ($person) => $mentions->contains($person->hashed_id)) : collect();
+        abort_unless($recipients->count() === $mentions->count(), 422, 'Mentioned users must be members of this project.');
+        foreach ($recipients as $recipient) {
+            abort_unless(\App\Jobs\Victory\DeliverTaskMention::permitted($recipient, $task)
+                && mb_stripos($body, '@' . (trim($recipient->name()) ?: $recipient->email)) !== false, 422, 'Choose a project member from the mention suggestions.');
+        }
+        $write = function () use ($user, $task, $body, $recipients) {
         $timestamp = now('UTC')->format('Y-m-d H:i:s.u');
         $row = (object) ['id' => (string) Str::uuid(), 'company_id' => $user->companyId(), 'task_id' => $task->id,
             'user_id' => $user->id, 'thread_key' => $this->threadKey($task), 'author' => mb_substr(trim($user->name()) ?: 'Team member', 0, 255),
             'body' => $body, 'created_at' => $timestamp, 'updated_at' => $timestamp];
         DB::table('victory_task_notes')->insert((array) $row);
+        foreach ($recipients as $recipient) {
+            DB::table('victory_note_mentions')->insert(['note_id' => $row->id, 'user_id' => $recipient->id, 'created_at' => now(), 'updated_at' => now()]);
+            \App\Jobs\Victory\DeliverTaskMention::dispatch($row->id, $recipient->id, $task->company->db)->afterCommit();
+        }
 
         return $this->present($row);
         };
         $result = isset($data['request_id'])
             ? \App\Services\Victory\WorkspaceCommands::run($data['request_id'], 'task_note:' . $task->hashed_id, $data, $write)
-            : $write();
+            : DB::transaction($write);
         return response()->json(['data' => $result], 201);
     }
 }

@@ -1043,6 +1043,7 @@ class LoginController extends BaseController
             return response()->json(['message' => 'User exists but is not attached to any company.'], 400);
         }
 
+        \App\Services\Victory\GoogleIdentity::sync($user, $socialite_user);
         Auth::login($user, false);
 
         $cu = $this->hydrateCompanyUser($user);
@@ -1053,19 +1054,6 @@ class LoginController extends BaseController
 
         if (Ninja::isHosted() && !$cu->first()->is_owner && !$user->account->isEnterprisePaidClient()) { //@phpstan-ignore-line
             return response()->json(['message' => 'Pro / Free accounts only the owner can log in. Please upgrade'], 403);
-        }
-
-        $name = OAuth::splitName($socialite_user->getName() ?? '');
-        $user->update([
-            'first_name' => $user->first_name ?: $name[0],
-            'last_name' => $user->last_name ?: $name[1],
-        ]);
-
-        if ($email_verified && strcasecmp($user->email, (string) $socialite_user->getEmail()) === 0) {
-            $user->forceFill([
-                'email_verified_at' => $user->email_verified_at ?: now(),
-                'confirmation_code' => null,
-            ])->save();
         }
 
         $company_token = app(TruthSource::class)->getCompanyToken();
