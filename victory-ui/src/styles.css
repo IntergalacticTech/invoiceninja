@@ -7,6 +7,7 @@
   --rule: #dde3ea;
   --accent: #1f5f99;
   --accent-soft: #e3eef8;
+  --workspace-on-accent: #ffffff;
   --st-backlog: #8b95a3;
   --st-ready: #3a8fd0;
   --st-progress: #d08a1e;
@@ -22,6 +23,7 @@
   :root:not([data-theme="light"]) {
     --bg: #11161d; --surface: #19202a; --ink: #e6ebf1; --muted: #9aa6b5; --rule: #2a3442;
     --accent: #6fb1ec; --accent-soft: #1d3248;
+    --workspace-on-accent: #11161d;
     --st-backlog: #7e8896; --st-ready: #5aa9e6; --st-progress: #e5a443; --st-done: #4cbc80;
     --note-bg: #2e2712; --note-ink: #f0d58a; --stop: #e5654f;
     color-scheme: dark;
@@ -30,12 +32,20 @@
 :root[data-theme="dark"] {
   --bg: #11161d; --surface: #19202a; --ink: #e6ebf1; --muted: #9aa6b5; --rule: #2a3442;
   --accent: #6fb1ec; --accent-soft: #1d3248;
+  --workspace-on-accent: #11161d;
   --st-backlog: #7e8896; --st-ready: #5aa9e6; --st-progress: #e5a443; --st-done: #4cbc80;
   --note-bg: #2e2712; --note-ink: #f0d58a; --stop: #e5654f;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
 body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font-body); }
+/* Bridge the shared module's token names to this host's light/dark palette. */
+.julia-workspace { --paper: var(--surface); --cream: var(--bg); --teal: var(--accent); }
+.julia-workspace .jw-primary,
+.julia-workspace .jw-metrics .jw-julia-card,
+.julia-workspace .jw-julia-card > span,
+.julia-workspace .jw-julia-card button { color: var(--workspace-on-accent); }
+.julia-workspace h1, .julia-workspace h2 { text-transform: none; }
 .wrap { max-width: 1180px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 .evaluation-note { background: var(--accent-soft); border-bottom: 1px solid var(--rule); font-size: 13px; }
 .evaluation-note .wrap { padding-block: 8px; }
