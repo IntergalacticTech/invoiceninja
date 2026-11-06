@@ -146,3 +146,8 @@ native application administration. Shared description/status edits use the
 atomic workspace command endpoint. The standalone owned tracker remains
 supported. When financial hiding is enabled, client setting overrides are also
 withheld from non-admin responses; they can contain private rate information.
+
+Session bootstrap also limits company settings to display identity and locale
+for non-admin users when financial hiding is enabled. Billing defaults and
+invoice configuration stay server-side; stored settings and administrator
+responses are unchanged.

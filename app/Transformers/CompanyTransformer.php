@@ -49,6 +49,7 @@ use App\Utils\Traits\MakesHash;
 use App\Models\RecurringExpense;
 use App\Models\RecurringInvoice;
 use App\Models\BankTransactionRule;
+use App\Utils\FinancialVisibility;
 
 /**
  * Class CompanyTransformer.
@@ -143,7 +144,14 @@ class CompanyTransformer extends EntityTransformer
             'subdomain' => (string) $company->subdomain ?: '',
             'portal_mode' => (string) $company->portal_mode ?: '',
             'portal_domain' => (string) $company->portal_domain ?: '',
-            'settings' => $company->settings ?? '',
+            // Session bootstrap is available to delivery users too. Company
+            // settings include default billing rates and invoice configuration.
+            'settings' => FinancialVisibility::hidden()
+                ? (object) array_intersect_key((array) $company->settings, array_flip([
+                    'name', 'company_logo', 'timezone_id', 'date_format_id',
+                    'language_id', 'country_id', 'currency_id',
+                ]))
+                : ($company->settings ?? ''),
             'enabled_tax_rates' => (int) $company->enabled_tax_rates,
             'enabled_modules' => (int) $company->enabled_modules,
             'updated_at' => (int) $company->updated_at,
