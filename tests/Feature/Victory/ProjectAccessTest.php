@@ -341,10 +341,12 @@ class ProjectAccessTest extends TestCase
         $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->putJson('/api/v1/tasks/' . $task->hashed_id . '?start=true', [])->assertOk();
         $entries = json_decode($task->fresh()->time_log, true);
         $this->assertSame(0, $entries[count($entries) - 1][1]);
+        $this->assertTrue((bool) $task->fresh()->is_running);
         $this->putJson('/api/v1/tasks/' . $task->hashed_id . '?stop=true', [])->assertOk();
         $entries = json_decode($task->fresh()->time_log, true);
         $this->assertCount(0, array_filter($entries, fn ($entry) => (int) $entry[1] === 0));
         $this->assertContains([$later, $later, 'existing completed interval', false], $entries);
+        $this->assertFalse((bool) $task->fresh()->is_running);
     }
 
     public function test_create_and_note_retries_return_the_original_effect(): void

@@ -78,6 +78,7 @@ class WorkspaceTaskController extends Controller
                 } else {
                     $repository->stop($current);
                 }
+                WorkspaceCommands::normalizeRunningInterval($current);
                 if (isset($data['note'])) {
                     $logs = json_decode($current->time_log ?: '[]', true) ?: [];
                     if ($logs) {

@@ -35,6 +35,9 @@ class WorkspaceCommands
             $entry = array_splice($logs, $active[0], 1)[0];
             $logs[] = $entry;
             $task->time_log = json_encode($logs);
+        }
+        $task->is_running = count($active) === 1;
+        if ($task->isDirty(['time_log', 'is_running'])) {
             $task->saveQuietly();
         }
         return $task;
