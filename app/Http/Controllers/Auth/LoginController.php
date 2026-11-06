@@ -1061,6 +1061,13 @@ class LoginController extends BaseController
             'last_name' => $user->last_name ?: $name[1],
         ]);
 
+        if ($email_verified && strcasecmp($user->email, (string) $socialite_user->getEmail()) === 0) {
+            $user->forceFill([
+                'email_verified_at' => $user->email_verified_at ?: now(),
+                'confirmation_code' => null,
+            ])->save();
+        }
+
         $company_token = app(TruthSource::class)->getCompanyToken();
 
         if (!$company_token) {

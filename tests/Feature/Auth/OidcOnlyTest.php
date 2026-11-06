@@ -16,6 +16,10 @@ use App\DataMapper\CompanySettings;
 use App\Models\Account;
 use App\Models\Company;
 use App\Models\User;
+use App\Jobs\Mail\NinjaMailer;
+use App\Jobs\Mail\NinjaMailerJob;
+use App\Jobs\Mail\NinjaMailerObject;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Hash;
@@ -231,6 +235,7 @@ class OidcOnlyTest extends TestCase
     public function test_oidc_callback_signs_in_invited_user_from_allowed_domain(): void
     {
         $context = $this->createLoginContext('invited-' . Str::uuid() . '@victorycto.com');
+        $context['user']->forceFill(['email_verified_at' => null, 'confirmation_code' => 'old-link'])->save();
 
         $this->configureOidc(self::GOOGLE_ISSUER, ['victorycto.com']);
         $this->mockOidcUser($context['user']->email, ['hd' => 'victorycto.com', 'email_verified' => true]);
@@ -243,6 +248,50 @@ class OidcOnlyTest extends TestCase
         $context['user']->refresh();
         $this->assertSame('oidc', $context['user']->oauth_provider_id);
         $this->assertSame('google-sub-' . $context['user']->email, $context['user']->oauth_user_id);
+        $this->assertNotNull($context['user']->email_verified_at);
+        $this->assertNull($context['user']->confirmation_code);
+    }
+
+    public function test_sso_only_invites_and_reconfirmation_do_not_queue_verification(): void
+    {
+        $context = $this->createLoginContext();
+        Queue::fake();
+        config(['services.oidc.only' => true]);
+
+        $this->assertSame($context['user'], $context['user']->service()->invite($context['company']));
+        Queue::assertNothingPushed();
+    }
+
+    public function test_sso_only_discards_previously_queued_verification_mail(): void
+    {
+        config(['services.oidc.only' => true]);
+        $object = new NinjaMailerObject();
+        $object->mailable = new NinjaMailer((object) ['text_view' => 'email.admin.verify_user_text']);
+        // No company is supplied: the obsolete job must return before resolving it.
+        (new NinjaMailerJob($object, true))->handle();
+        $this->assertTrue(true);
+    }
+
+    public function test_old_confirmation_links_cannot_set_passwords_in_sso_only_mode(): void
+    {
+        config(['services.oidc.only' => true]);
+        $this->get('/user/confirm/old-code')->assertStatus(403);
+        $this->post('/user/confirm/old-code', ['password' => 'new-password'])->assertStatus(403);
+    }
+
+    public function test_unverified_oidc_claim_does_not_verify_an_existing_linked_user(): void
+    {
+        $context = $this->createLoginContext('invited-' . Str::uuid() . '@victorycto.com');
+        $context['user']->forceFill([
+            'email_verified_at' => null,
+            'oauth_provider_id' => 'oidc',
+            'oauth_user_id' => 'google-sub-' . $context['user']->email,
+        ])->save();
+        $this->configureOidc(self::GOOGLE_ISSUER, ['victorycto.com']);
+        $this->mockOidcUser($context['user']->email, ['hd' => 'victorycto.com', 'email_verified' => false]);
+
+        $this->get('/auth/oidc?code=abc&state=xyz')->assertStatus(302);
+        $this->assertNull($context['user']->fresh()->email_verified_at);
     }
 
     // ---------------------------------------------------------------

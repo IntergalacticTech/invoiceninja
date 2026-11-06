@@ -80,6 +80,13 @@ class NinjaMailerJob implements ShouldQueue
 
     public function handle()
     {
+        // Also discard verification messages queued before SSO-only was enabled.
+        if (config('services.oidc.only')
+            && $this->nmo?->mailable instanceof NinjaMailer
+            && ($this->nmo->mailable->mail_obj->text_view ?? null) === 'email.admin.verify_user_text') {
+            return;
+        }
+
         /*Set the correct database*/
         MultiDB::setDb($this->nmo->company->db);
 

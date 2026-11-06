@@ -40,8 +40,8 @@ Route::get('auth/{provider}', [LoginController::class, 'redirectToProvider']);
 Route::get('calendar_connection/{provider}/callback', [CalendarConnectionController::class, 'callback'])->name('calendar_connection.callback');
 
 Route::middleware(['url_db'])->group(function () {
-    Route::get('/user/confirm/{confirmation_code}', [UserController::class, 'confirm'])->middleware('throttle:10,1');
-    Route::post('/user/confirm/{confirmation_code}', [UserController::class, 'confirmWithPassword'])->middleware('throttle:10,1');
+    Route::get('/user/confirm/{confirmation_code}', [UserController::class, 'confirm'])->middleware(['oidc_only', 'throttle:10,1']);
+    Route::post('/user/confirm/{confirmation_code}', [UserController::class, 'confirmWithPassword'])->middleware(['oidc_only', 'throttle:10,1']);
 });
 
 Route::get('stripe/signup/{token}', [StripeConnectController::class, 'initialize'])->middleware('throttle:10,1')->name('stripe_connect.initialization');

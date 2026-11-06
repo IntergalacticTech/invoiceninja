@@ -26,6 +26,10 @@ class UserService
 
     public function invite(Company $company, bool $is_react = true)
     {
+        // The identity provider verifies addresses in SSO-only installations.
+        if (config('services.oidc.only')) {
+            return $this->user;
+        }
 
         if (Ninja::isHosted() && $company->account->users()->count() == 1) {
             $company = Company::on('db-ninja-01')->find(config('ninja.ninja_default_company_id'));
