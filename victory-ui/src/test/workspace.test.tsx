@@ -42,4 +42,17 @@ describe('shared workspace', () => {
     expect(screen.getByRole('button', { name: 'New task' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: /Start timer/ })).not.toBeInTheDocument();
   });
+  it('edits a selected task through an accessible form and prevents overlapping saves', async () => {
+    const host = makeHost(); const user = userEvent.setup();
+    vi.mocked(host.action).mockImplementation(() => new Promise(() => {}));
+    render(<Workspace host={host} initialTaskId="t1" />);
+    const detail = within(await screen.findByRole('region', { name: 'Task details' }));
+    await user.clear(detail.getByRole('textbox', { name: /^Description$/ }));
+    await user.type(detail.getByRole('textbox', { name: /^Description$/ }), 'Reviewed next step');
+    await user.click(detail.getByRole('button', { name: 'Save description' }));
+    expect(detail.getByRole('button', { name: 'Save description' })).toBeDisabled();
+    expect(host.action).toHaveBeenCalledOnce();
+    expect(host.action).toHaveBeenCalledWith('t1', { action: 'update', description: 'Reviewed next step', expected_updated_at: 100 });
+  });
+
 });
