@@ -47,7 +47,7 @@ function AccessPanel({ host, projects, onClose }: { host: Host; projects: Projec
   </section>;
 }
 
-function TaskPanel({ task, project, data, host, run, onClose }: { task: Task; project: Project; data: Snapshot; host: Host; run(action: () => Promise<unknown>): Promise<boolean>; onClose(): void }) {
+function TaskPanel({ task, project, data, host, run, onClose, commandBusy }: { task: Task; project: Project; data: Snapshot; host: Host; run(action: () => Promise<unknown>): Promise<boolean>; onClose(): void; commandBusy: boolean }) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [note, setNote] = useState('');
   const [noteRequestId, setNoteRequestId] = useState(() => crypto.randomUUID());
@@ -64,16 +64,16 @@ function TaskPanel({ task, project, data, host, run, onClose }: { task: Task; pr
   return <section className="jw-detail" aria-label="Task details">
     <div className="jw-row"><span className="jw-eyebrow">{project.name}</span><button className="jw-icon" onClick={onClose} aria-label="Close task details"><Icon name="close" /></button></div>
     <h2>{title(task)}</h2><p className="jw-muted">{task.own ? 'Assigned to you' : task.assignee || 'Team task'} · {hours(task.seconds)} recorded</p>
-    <label>Status<select value={task.status_id} disabled={!project.writable || busy} onChange={e => void run(() => host.action(task.id, { action: 'update', status_id: e.target.value, expected_updated_at: task.updated_at }))}>{data.statuses.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-    <label>Description<textarea rows={5} value={description} disabled={!project.writable} onChange={e => setDescription(e.target.value)} /></label>
-    {project.writable && description !== task.description && <button className="jw-secondary" disabled={busy} onClick={() => void run(() => host.action(task.id, { action: 'update', description, expected_updated_at: task.updated_at }))}>Save description</button>}
+    <label>Status<select aria-label="Status" value={task.status_id} disabled={!project.writable || busy || commandBusy} onChange={e => void run(() => host.action(task.id, { action: 'update', status_id: e.target.value, expected_updated_at: task.updated_at }))}>{data.statuses.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+    <label>Description<textarea aria-label="Description" rows={5} value={description} disabled={!project.writable} onChange={e => setDescription(e.target.value)} /></label>
+    {project.writable && description !== task.description && <button className="jw-secondary" disabled={busy || commandBusy} onClick={() => void run(() => host.action(task.id, { action: 'update', description, expected_updated_at: task.updated_at }))}>Save description</button>}
     {host.ask && <button className="jw-ask" onClick={() => host.ask?.(`Help me work on task ${task.id}: ${title(task)}. Project ${project.id}. Check my permissions and the current record before acting.`)}><Icon name="spark" /> Work through this with Julia</button>}
     <h3>Conversation</h3>
     {loading && <p role="status" className="jw-muted">Loading notes…</p>}
     {error && <p role="alert" className="jw-error">{error}</p>}
     {!loading && !notes.length && !error && <p className="jw-muted">No notes yet. Keep the next person in the loop.</p>}
     <div className="jw-notes">{notes.map(n => <article key={n.id}><strong>{n.author}</strong><time>{new Date(n.created_at).toLocaleString()}</time><p>{n.body}</p></article>)}</div>
-    {project.writable && <form onSubmit={submit}><label>Add a note<textarea value={note} rows={3} onChange={e => setNote(e.target.value)} maxLength={10000} placeholder="Progress, a question, or what happens next…" /></label><button className="jw-primary" disabled={busy || !note.trim()}>{busy ? 'Adding…' : 'Add note'}</button></form>}
+    {project.writable && <form onSubmit={submit}><label>Add a note<textarea aria-label="Add a note" value={note} rows={3} onChange={e => setNote(e.target.value)} maxLength={10000} placeholder="Progress, a question, or what happens next…" /></label><button className="jw-primary" disabled={busy || !note.trim()}>{busy ? 'Adding…' : 'Add note'}</button></form>}
   </section>;
 }
 
@@ -139,7 +139,7 @@ export function Workspace({ host, initialProjectId = null, initialTaskId = null 
           {data.has_more && <p className="jw-more"><button className="jw-secondary" disabled={refreshing || limit >= 2000} onClick={() => setLimit(value => Math.min(2000, value + 200))}>{limit >= 2000 ? 'More history is available in the team app' : refreshing ? 'Loading…' : 'Load more tasks'}</button></p>}
           <footer className="jw-footer"><span>{tasks.length} shown · {data.tasks_total} matching task{data.tasks_total === 1 ? '' : 's'}</span><span>Live from Invoice Ninja · {new Date(data.loaded_at * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span></footer>
         </section>
-        {selectedTask && <TaskPanel key={selectedTask.id} task={selectedTask} project={data.projects.find(p => p.id === selectedTask.project_id)!} data={data} host={host} run={run} onClose={() => setTaskId(null)} />}
+        {selectedTask && <TaskPanel commandBusy={busy} key={selectedTask.id} task={selectedTask} project={data.projects.find(p => p.id === selectedTask.project_id)!} data={data} host={host} run={run} onClose={() => setTaskId(null)} />}
       </div>
     </>}
   </div>;

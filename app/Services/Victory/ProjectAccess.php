@@ -41,4 +41,11 @@ class ProjectAccess
     {
         return in_array($this->role($project), ['contributor', 'manager'], true);
     }
+
+    public function canReadTime(Task $task): bool
+    {
+        // An administrator or an unconfigured installation keeps native behavior.
+        return $this->companyId === null
+            || (int) ($task->assigned_user_id ?: $task->user_id) === auth()->id();
+    }
 }
