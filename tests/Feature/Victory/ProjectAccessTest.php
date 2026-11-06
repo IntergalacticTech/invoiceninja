@@ -258,6 +258,43 @@ class ProjectAccessTest extends TestCase
             ->assertOk()->assertSee('987654');
     }
 
+    public function test_legacy_and_workspace_timers_share_one_person_lock_for_members_and_admins(): void
+    {
+        $this->grant();
+        foreach ([[$this->member, $this->memberToken], [$this->user, $this->token]] as [$owner, $token]) {
+            $tasks = [];
+            for ($i = 0; $i < 2; $i++) {
+                $tasks[] = Task::factory()->create(['company_id' => $this->company->id, 'project_id' => $this->project->id,
+                    'client_id' => $this->client->id, 'user_id' => $owner->id, 'assigned_user_id' => $owner->id,
+                    'time_log' => '[]', 'invoice_id' => null]);
+            }
+            $this->withHeaders(['X-API-TOKEN' => $token])->postJson('/api/v1/victory/tasks/' . $tasks[0]->hashed_id . '/workspace', ['action' => 'start'])->assertOk();
+            $this->putJson('/api/v1/tasks/' . $tasks[1]->hashed_id . '?start=true', [])->assertConflict();
+            $this->assertSame('[]', $tasks[1]->fresh()->time_log);
+            $this->postJson('/api/v1/victory/tasks/' . $tasks[0]->hashed_id . '/workspace', ['action' => 'stop'])->assertOk();
+            $this->putJson('/api/v1/tasks/' . $tasks[1]->hashed_id . '?start=true', [])->assertOk();
+            $this->postJson('/api/v1/victory/tasks/' . $tasks[0]->hashed_id . '/workspace', ['action' => 'start'])->assertConflict();
+            $this->putJson('/api/v1/tasks/' . $tasks[1]->hashed_id . '?stop=true', [])->assertOk();
+        }
+    }
+
+    public function test_legacy_time_log_writes_and_creation_cannot_create_a_competing_timer(): void
+    {
+        $this->grant();
+        $tasks = [];
+        for ($i = 0; $i < 2; $i++) {
+            $tasks[] = Task::factory()->create(['company_id' => $this->company->id, 'project_id' => $this->project->id,
+                'client_id' => $this->client->id, 'user_id' => $this->member->id, 'assigned_user_id' => $i === 0 ? null : $this->member->id,
+                'time_log' => $i === 0 ? '[[100,0,"running",true]]' : '[]']);
+        }
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->putJson('/api/v1/tasks/' . $tasks[1]->hashed_id,
+            ['time_log' => '[[200,0,"must not start",true]]'])->assertConflict();
+        $this->postJson('/api/v1/tasks', ['project_id' => $this->project->hashed_id, 'client_id' => $this->client->hashed_id,
+            'description' => 'Must not create a competing timer', 'time_log' => '[[200,0,"must not start",true]]'])->assertConflict();
+        $this->assertSame('[]', $tasks[1]->fresh()->time_log);
+        $this->assertSame(0, Task::where('description', 'Must not create a competing timer')->count());
+    }
+
     public function test_session_bootstrap_withholds_company_financial_settings_but_keeps_locale(): void
     {
         config(['ninja.hide_financials_from_non_admins' => true, 'ninja.environment' => 'selfhost']);

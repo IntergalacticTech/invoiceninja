@@ -151,3 +151,8 @@ Session bootstrap also limits company settings to display identity and locale
 for non-admin users when financial hiding is enabled. Billing defaults and
 invoice configuration stay server-side; stored settings and administrator
 responses are unchanged.
+
+With project enforcement enabled, legacy timer starts and active time-log writes
+lock the time owner and use the same competing-timer check as workspace
+commands, including for administrators. The shared Workspace screen uses its
+own timer controls; the legacy tracker remains on the older team screens.

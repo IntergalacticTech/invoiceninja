@@ -55,14 +55,51 @@ class VictoryProjectAccess
                     $access->roles = DB::table('victory_project_access')->where('company_id', $access->companyId)
                         ->where('user_id', $user->id)->pluck('role', 'project_id')->all();
                     $this->authorizeRoute($request, $access);
+                    if ($this->isLegacyTimeWrite($request)) {
+                        $this->guardLegacyTimeWrite($request, $user);
+                    }
                     return $next($request);
                 };
                 return $request->isMethod('GET') ? $dispatch() : DB::transaction($dispatch);
+            }
+            if (config('ninja.victory_project_access_enabled', false) && $user && $this->isLegacyTimeWrite($request)) {
+                return DB::transaction(function () use ($request, $next, $user) {
+                    $this->guardLegacyTimeWrite($request, $user);
+                    return $next($request);
+                });
             }
             return $next($request);
         } finally {
             app()->instance(ProjectAccess::class, new ProjectAccess());
             $truth->setUser($originalUser)->setCompanyUser($originalCu)->setCompanyToken($originalToken);
+        }
+    }
+
+    private function isLegacyTimeWrite(Request $request): bool
+    {
+        $legacy = ($request->isMethod('POST') && $request->path() === 'api/v1/tasks')
+            || (in_array($request->method(), ['PUT', 'PATCH'], true)
+                && preg_match('#^api/v1/tasks/[^/]+$#', $request->path()));
+        return $legacy && ($request->hasAny(['start', 'stop', 'time_log', 'is_running', 'action']));
+    }
+
+    private function guardLegacyTimeWrite(Request $request, User $user): void
+    {
+        $task = null;
+        if (preg_match('#^api/v1/tasks/([^/]+)$#', $request->path(), $match)) {
+            $task = Task::withoutGlobalScope('victory_projects')->where('company_id', $user->companyId())
+                ->findOrFail($this->decodePrimaryKey($match[1]));
+        }
+        $creator = $request->has('user_id') ? $this->decodePrimaryKey((string) $request->input('user_id')) : ($task?->user_id ?: $user->id);
+        $assigned = $request->has('assigned_user_id') ? $this->decodePrimaryKey((string) $request->input('assigned_user_id')) : $task?->assigned_user_id;
+        $owner = (int) ($assigned ?: $creator);
+        CompanyUser::where('company_id', $user->companyId())->where('user_id', $owner)->lockForUpdate()->firstOrFail();
+        $log = $request->input('time_log', []);
+        $log = is_string($log) ? json_decode($log, true) : $log;
+        $running = is_array($log) && collect($log)->contains(fn ($entry) => is_array($entry)
+            && isset($entry[0]) && (int) ($entry[1] ?? 0) === 0);
+        if ($request->boolean('start') || $request->boolean('is_running') || $request->input('action') === 'start' || $running) {
+            \App\Services\Victory\WorkspaceCommands::requireNoCompetingTimer($user->companyId(), $owner, $task?->id);
         }
     }
 

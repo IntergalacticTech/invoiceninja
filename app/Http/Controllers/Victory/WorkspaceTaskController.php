@@ -72,15 +72,7 @@ class WorkspaceTaskController extends Controller
                 abort_if($current->invoice_id, 409, 'This task is locked for time tracking.');
                 $repository = app(TaskRepository::class);
                 if ($data['action'] === 'start') {
-                    $others = Task::withoutGlobalScope('victory_projects')->where('company_id', $user->companyId())
-                        ->where('id', '!=', $current->id)->where('is_deleted', false)
-                        ->where(fn ($q) => $q->where('assigned_user_id', $user->id)
-                            ->orWhere(fn ($q) => $q->whereNull('assigned_user_id')->where('user_id', $user->id)))->get(['time_log']);
-                    foreach ($others as $other) {
-                        foreach (json_decode($other->time_log ?: '[]', true) ?: [] as $entry) {
-                            abort_if(isset($entry[0]) && (int) ($entry[1] ?? 0) === 0, 409, 'Stop your running timer before starting another.');
-                        }
-                    }
+                    WorkspaceCommands::requireNoCompetingTimer($user->companyId(), $user->id, $current->id);
                     $repository->start($current);
                 } else {
                     $repository->stop($current);

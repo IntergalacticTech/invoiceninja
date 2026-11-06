@@ -42,7 +42,7 @@ function Shell({ onSignOut }: { onSignOut: () => void }) {
         Skip to content
       </a>
       <Header current={section} onSignOut={onSignOut} />
-      <Tracker />
+      {section !== 'workspace' && <Tracker />}
       <main id="main" tabIndex={-1}>
         <div className="wrap">{render ? render(route) : null}</div>
       </main>
