@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'victory_project_access_enabled' => env('VICTORY_PROJECT_ACCESS_ENABLED', false),
 
     'web_url' => 'https://www.invoiceninja.com',
     'admin_token' => env('NINJA_ADMIN_TOKEN', ''),

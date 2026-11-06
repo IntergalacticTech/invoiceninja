@@ -108,3 +108,33 @@ stdio adapter and dedicated API token setup; its default mode is read-only.
 Keep Google-only browser sign-in and role-based data access intact when adding
 integration tools. Check MCP tool contracts alongside the API when upgrading;
 do not treat documented setup instructions as proof of a live connection.
+
+## Integrated Julia workspace
+
+The shared `@victory/workspace` UI lives in `workspace-ui/`. The standalone host
+is `/team/#/workspace`; Julia pins the same package tarball. Repack and update
+both hosts when changing the shared component. The existing team screens and
+upstream admin app remain available.
+
+`VICTORY_PROJECT_ACCESS_ENABLED=true` enables explicit project grants for
+non-admin users. With no grants they see no projects, regardless of broad native
+view permissions. Native permissions still apply. Admins manage grants through
+`GET /api/v1/victory/access/users` and `PUT .../users/{hashed_user_id}`; roles are
+viewer, contributor, and manager. Empty assignments revoke all project access.
+Changes are transactional and audited in `victory_access_audit`. The same policy
+covers direct APIs, task sorting, notes, and time entries; other non-admin API
+surfaces are denied. Test restricted users before enabling the flag.
+
+Only an authenticated administrator token named exactly `julia-workspace` can
+supply `X-Victory-Actor: <verified-user-email>`. The backend resolves one active
+user in the same account/company and applies that user's current identity,
+native permissions, and project grants. Julia supplies this header server-side;
+never expose the token in a browser or accept an actor email from a client form.
+The additive migration must run before enabling project access.
+
+`GET /api/v1/victory/workspace` returns the shared UI's allowlisted snapshot.
+`POST /api/v1/victory/tasks/{task}/workspace` supports atomic field edits and
+owned timer start/stop, preserving unrelated time and financial fields. Timer
+commands serialize per person and reject a competing running task. During
+Julia evaluation, writable pilot projects carry `custom_value4` equal to
+`julia-workspace-pilot`. Avaza remains the production source until cutover.

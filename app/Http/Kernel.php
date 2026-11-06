@@ -185,6 +185,7 @@ class Kernel extends HttpKernel
         SetInviteDb::class,
         SetDbByCompanyKey::class,
         TokenAuth::class,
+        \App\Http\Middleware\VictoryProjectAccess::class,
         ContactTokenAuth::class,
         ContactKeyLogin::class,
         Authenticate::class,
