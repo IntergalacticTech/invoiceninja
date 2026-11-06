@@ -258,6 +258,22 @@ class ProjectAccessTest extends TestCase
             ->assertOk()->assertSee('987654');
     }
 
+    public function test_session_bootstrap_withholds_company_financial_settings_but_keeps_locale(): void
+    {
+        config(['ninja.hide_financials_from_non_admins' => true, 'ninja.environment' => 'selfhost']);
+        $settings = $this->company->settings;
+        $settings->default_task_rate = 987654;
+        $settings->timezone_id = '17';
+        $this->company->settings = $settings;
+        $this->company->save();
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->postJson('/api/v1/refresh_react')
+            ->assertOk()->assertDontSee('987654')
+            ->assertJsonPath('data.0.company.settings.timezone_id', '17');
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->postJson('/api/v1/refresh_react')
+            ->assertOk()->assertSee('987654');
+        $this->assertEquals(987654, $this->company->fresh()->settings->default_task_rate);
+    }
+
     public function test_create_and_note_retries_return_the_original_effect(): void
     {
         $this->project->custom_value4 = 'julia-workspace-pilot';
