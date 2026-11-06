@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\CompanyUser;
+use App\Models\Document;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\TaskStatus;
@@ -46,10 +47,17 @@ class VictoryProjectAccess
             }
             $user = auth()->user();
             if (config('ninja.victory_project_access_enabled', false) && $user && !$user->isSuperUser()) {
-                $access->companyId = $user->companyId();
-                $access->roles = DB::table('victory_project_access')->where('company_id', $access->companyId)
-                    ->where('user_id', $user->id)->pluck('role', 'project_id')->all();
-                $this->authorizeRoute($request, $access);
+                $dispatch = function () use ($request, $next, $access, $user) {
+                    if (!$request->isMethod('GET')) {
+                        CompanyUser::where('company_id', $user->companyId())->where('user_id', $user->id)->lockForUpdate()->firstOrFail();
+                    }
+                    $access->companyId = $user->companyId();
+                    $access->roles = DB::table('victory_project_access')->where('company_id', $access->companyId)
+                        ->where('user_id', $user->id)->pluck('role', 'project_id')->all();
+                    $this->authorizeRoute($request, $access);
+                    return $next($request);
+                };
+                return $request->isMethod('GET') ? $dispatch() : DB::transaction($dispatch);
             }
             return $next($request);
         } finally {
@@ -64,6 +72,12 @@ class VictoryProjectAccess
         $includes = array_filter(explode(',', (string) $request->input('include', '')));
         abort_if(array_diff($includes, ['client', 'assigned_user', 'company_user']), 403, 'This relation is not available.');
         if ($request->isMethod('GET')) {
+            if (preg_match('#^documents/([^/]+)/download$#', $path, $match)) {
+                $document = Document::where('company_id', $access->companyId)->find($this->decodePrimaryKey($match[1]));
+                abort_unless($document && $document->documentable_type === Task::class
+                    && Task::find($document->documentable_id), 404);
+                return;
+            }
             abort_unless(preg_match('#^(projects(?:/[^/]+)?|tasks(?:/[^/]+)?|clients|users|task_statuses|statics|victory/time_entries|victory/workspace|victory/access/me|victory/tasks/[^/]+/notes)$#', $path), 403);
             if (preg_match('#^(projects|tasks)/([^/]+)$#', $path, $match)) {
                 $model = $match[1] === 'projects' ? Project::class : Task::class;
@@ -75,7 +89,7 @@ class VictoryProjectAccess
             return;
         }
         $project = null;
-        if ($request->isMethod('POST') && $path === 'tasks') {
+        if ($request->isMethod('POST') && in_array($path, ['tasks', 'victory/workspace/tasks'], true)) {
             $project = $this->decodePrimaryKey((string) $request->input('project_id', ''));
         } elseif ($path === 'tasks/sort' && $request->isMethod('POST')) {
             abort_if($request->input('status_ids', []) !== [], 403);

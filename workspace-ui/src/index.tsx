@@ -50,6 +50,7 @@ function AccessPanel({ host, projects, onClose }: { host: Host; projects: Projec
 function TaskPanel({ task, project, data, host, run, onClose }: { task: Task; project: Project; data: Snapshot; host: Host; run(action: () => Promise<unknown>): Promise<boolean>; onClose(): void }) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [note, setNote] = useState('');
+  const [noteRequestId, setNoteRequestId] = useState(() => crypto.randomUUID());
   const [description, setDescription] = useState(task.description);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -57,7 +58,7 @@ function TaskPanel({ task, project, data, host, run, onClose }: { task: Task; pr
   useEffect(() => { let current = true; setLoading(true); host.notes(task.id).then(rows => { if (current) setNotes(rows); }).catch(e => { if (current) setError(message(e)); }).finally(() => { if (current) setLoading(false); }); return () => { current = false; }; }, [host, task.id]);
   async function submit(e: FormEvent) {
     e.preventDefault(); if (!note.trim()) return; setBusy(true); setError('');
-    try { await host.addNote(task.id, note.trim()); setNote(''); setNotes(await host.notes(task.id)); }
+    try { await host.addNote(task.id, note.trim(), noteRequestId); setNote(''); setNoteRequestId(crypto.randomUUID()); setNotes(await host.notes(task.id)); }
     catch (e) { setError(message(e)); } finally { setBusy(false); }
   }
   return <section className="jw-detail" aria-label="Task details">
@@ -76,22 +77,27 @@ function TaskPanel({ task, project, data, host, run, onClose }: { task: Task; pr
   </section>;
 }
 
-export function Workspace({ host }: { host: Host }) {
+export function Workspace({ host, initialProjectId = null, initialTaskId = null }: { host: Host; initialProjectId?: string | null; initialTaskId?: string | null }) {
   const [data, setData] = useState<Snapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [projectId, setProjectId] = useState<string | null>(null);
-  const [taskId, setTaskId] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(initialProjectId);
+  const [taskId, setTaskId] = useState<string | null>(initialTaskId);
   const [view, setView] = useState('all');
   const [search, setSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  useEffect(() => { const timer = setTimeout(() => { setAppliedSearch(search); setLimit(200); }, 250); return () => clearTimeout(timer); }, [search]);
+  useEffect(() => { setProjectId(initialProjectId); setTaskId(initialTaskId); }, [initialProjectId, initialTaskId]);
   const [newTask, setNewTask] = useState('');
+  const [createRequestId, setCreateRequestId] = useState(() => crypto.randomUUID());
   const [creating, setCreating] = useState(false);
   const [access, setAccess] = useState(false);
   const [clock, setClock] = useState(Date.now());
+  const [limit, setLimit] = useState(200);
   const generation = useRef(0);
-  const reload = useCallback(async () => { const request = ++generation.current; setRefreshing(true); try { const next = await host.load(); if (request !== generation.current) return false; setData(next); setError(''); return true; } catch (e) { if (request === generation.current) { setData(null); setError(message(e)); } return false; } finally { if (request === generation.current) { setLoading(false); setRefreshing(false); } } }, [host]);
+  const reload = useCallback(async () => { const request = ++generation.current; setRefreshing(true); try { const next = await host.load({ projectId, view, limit, search: appliedSearch }); if (request !== generation.current) return false; setData(next); setError(''); return true; } catch (e) { if (request === generation.current) { setData(null); setError(message(e)); } return false; } finally { if (request === generation.current) { setLoading(false); setRefreshing(false); } } }, [host, projectId, view, limit, appliedSearch]);
   useEffect(() => { void reload(); const refresh = () => { if (document.visibilityState === 'visible') void reload(); }; window.addEventListener('focus', refresh); const timer = window.setInterval(refresh, 60000); return () => { ++generation.current; window.removeEventListener('focus', refresh); window.clearInterval(timer); }; }, [reload]);
   useEffect(() => { const tick = window.setInterval(() => setClock(Date.now()), 1000); return () => window.clearInterval(tick); }, []);
   useEffect(() => { host.select?.(projectId, taskId); return () => host.select?.(null, null); }, [host, projectId, taskId]);
@@ -105,36 +111,33 @@ export function Workspace({ host }: { host: Host }) {
   const tasks = useMemo(() => (data?.tasks || []).filter(t => (!projectId || t.project_id === projectId) && (view !== 'mine' || t.own) && (view === 'done' ? done.has(t.status_id) : !done.has(t.status_id)) && (!search || t.description.toLowerCase().includes(search.toLowerCase()))).sort((a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999') || title(a).localeCompare(title(b))), [data, projectId, view, search, done]);
   const project = data?.projects.find(p => p.id === projectId);
   const selectedTask = data?.tasks.find(t => t.id === taskId);
-  const running = data?.tasks.find(t => t.own && t.running_since);
+  const running = data?.running_tasks[0];
   const writable = !!project?.writable;
-  const open = data?.tasks.filter(t => !done.has(t.status_id)) || [];
-  const mine = open.filter(t => t.own);
-  const day = new Date().toISOString().slice(0, 10);
-  const overdue = open.filter(t => t.due_date && t.due_date < day);
-  const changeProject = (id: string | null) => { setProjectId(id); setTaskId(null); setCreating(false); setNewTask(''); };
+  const changeProject = (id: string | null) => { setLimit(200); setProjectId(id); setTaskId(null); setCreating(false); setNewTask(''); };
   async function submitTask(e: FormEvent) {
     e.preventDefault(); if (!projectId || !newTask.trim()) return;
-    const ok = await run(() => host.create(projectId, newTask.trim(), data?.statuses[0]?.id));
-    if (ok) { setNewTask(''); setCreating(false); }
+    const ok = await run(() => host.create(projectId, newTask.trim(), data?.statuses[0]?.id, createRequestId));
+    if (ok) { setNewTask(''); setCreating(false); setCreateRequestId(crypto.randomUUID()); }
   }
   return <div className="julia-workspace">
     <header className="jw-header"><div><span className="jw-eyebrow">YOUR CONNECTED WORKSPACE</span><h1>Make room for the work.</h1><p>Projects, progress, and the next useful step. All in one place.</p></div><div className="jw-header-actions"><button className="jw-secondary" onClick={() => void reload()} disabled={refreshing || busy}><Icon name="refresh" />{refreshing ? 'Refreshing…' : 'Refresh'}</button>{data && <a className="jw-source" href={`${data.source_url}/team/#/projects`} target="_blank" rel="noreferrer">Open team app <Icon name="external" /></a>}</div></header>
     {data?.evaluation && <aside className="jw-evaluation"><span className="jw-dot" /><strong>Evaluation workspace</strong><span>Production time stays in Avaza. Test changes are enabled in pilot projects.</span></aside>}
     {error && <div role="alert" className="jw-error">{error}<button onClick={() => void reload()} disabled={refreshing}>Try again</button></div>}
     {loading ? <div className="jw-loading" role="status"><span />Connecting your projects…</div> : !data ? <div className="jw-empty"><Icon name="clock" /><h2>Your workload could not be loaded.</h2><p>Restore the connection and refresh to see current work.</p></div> : <>
-      <section className="jw-metrics" aria-label="Workspace overview"><article><span>Active projects</span><strong>{data.projects.length.toString().padStart(2, '0')}</strong><small>Within your access</small></article><article><span>Your open tasks</span><strong>{mine.length.toString().padStart(2, '0')}</strong><small>A clear place to start</small></article><article><span>Past due</span><strong className={overdue.length ? 'jw-warm' : ''}>{overdue.length.toString().padStart(2, '0')}</strong><small>Across visible projects</small></article><article className="jw-julia-card"><Icon name="spark" /><span>One conversation away</span><strong>Find your next step.</strong><button disabled={!host.ask} onClick={() => host.ask?.('Review my permitted Invoice Ninja tasks and deadlines. What should I work on next? Link to the relevant project and task, and distinguish missing information from an empty workload.')}>Plan with Julia <Icon name="arrow" /></button></article></section>
+      <section className="jw-metrics" aria-label="Workspace overview"><article><span>Active projects</span><strong>{data.projects.length.toString().padStart(2, '0')}</strong><small>Within your access</small></article><article><span>Your open tasks</span><strong>{data.counts.mine.toString().padStart(2, '0')}</strong><small>A clear place to start</small></article><article><span>Past due</span><strong className={data.counts.overdue ? 'jw-warm' : ''}>{data.counts.overdue.toString().padStart(2, '0')}</strong><small>Across visible projects</small></article><article className="jw-julia-card"><Icon name="spark" /><span>One conversation away</span><strong>Find your next step.</strong><button disabled={!host.ask && !host.juliaUrl} onClick={() => host.ask ? host.ask('Review my permitted Invoice Ninja tasks and deadlines. What should I work on next? Link to the relevant project and task, and distinguish missing information from an empty workload.') : window.open(host.juliaUrl, '_blank', 'noopener,noreferrer')}>{host.ask ? 'Plan with Julia' : 'Open Julia'} <Icon name="arrow" /></button></article></section>
       {running && <aside className="jw-running" role="status"><span className="jw-pulse" /><div><strong>{title(running)}</strong><small>Your timer is running</small></div><time>{new Date(Math.max(0, clock - running.running_since! * 1000)).toISOString().slice(11, 19)}</time><button className="jw-primary" disabled={busy} onClick={() => void run(() => host.action(running.id, { action: 'stop' }))}>Stop timer</button></aside>}
       {access && host.access && <AccessPanel host={host} projects={data.projects} onClose={() => setAccess(false)} />}
       <div className={`jw-layout${selectedTask ? ' jw-with-detail' : ''}`}>
         <nav className="jw-projects" aria-label="Projects"><div className="jw-row"><h2>Projects</h2><span className="jw-count">{data.projects.length}</span></div><button className={`jw-project${!projectId ? ' jw-active' : ''}`} onClick={() => changeProject(null)}><span className="jw-project-mark">↗</span><span><strong>All your work</strong><small>The whole picture</small></span></button>{data.projects.map(p => <button key={p.id} className={`jw-project${projectId === p.id ? ' jw-active' : ''}`} onClick={() => changeProject(p.id)}><span className="jw-project-mark">{p.name.slice(0, 1).toUpperCase()}</span><span><strong>{p.name}</strong><small>{p.pilot ? 'Pilot · test changes enabled' : p.client || 'Project workspace'}</small></span></button>)}{!data.projects.length && <p className="jw-muted">No project access yet. Ask an administrator to assign a project.</p>}{data.identity.is_admin && host.access && <button className="jw-manage" onClick={() => setAccess(value => !value)}>Manage project access <Icon name="arrow" /></button>}</nav>
         <section className="jw-work"><div className="jw-work-heading"><div><span className="jw-eyebrow">{project?.client || 'A LITTLE CLARITY GOES A LONG WAY'}</span><h2>{project?.name || 'Your work, in focus.'}</h2></div>{project && <button className="jw-primary" disabled={!writable || busy} onClick={() => setCreating(value => !value)}><Icon name="plus" />New task</button>}</div>
           {project && !writable && <p className="jw-readonly">{data.evaluation && !project.pilot ? 'Mirrored from Avaza during evaluation. Browse here; make test changes in a pilot project.' : 'You have read access to this project.'}</p>}
-          <div className="jw-toolbar"><div className="jw-tabs" role="group" aria-label="Task view">{([['all', 'Open work'], ['mine', 'Assigned to me'], ['done', 'Completed']] as const).map(([id, label]) => <button key={id} aria-pressed={view === id} className={view === id ? 'jw-tab-active' : ''} onClick={() => setView(id)}>{label}</button>)}</div><input aria-label="Search tasks" placeholder="Find a task…" value={search} onChange={e => setSearch(e.target.value)} /></div>
+          <div className="jw-toolbar"><div className="jw-tabs" role="group" aria-label="Task view">{([['all', 'Open work'], ['mine', 'Assigned to me'], ['done', 'Completed']] as const).map(([id, label]) => <button key={id} aria-pressed={view === id} className={view === id ? 'jw-tab-active' : ''} onClick={() => { setLimit(200); setTaskId(null); setView(id); }}>{label}</button>)}</div><input aria-label="Search tasks" placeholder="Find a task…" value={search} onChange={e => setSearch(e.target.value)} /></div>
           {creating && <form className="jw-create" onSubmit={submitTask}><label>What needs to happen?<textarea autoFocus rows={2} value={newTask} onChange={e => setNewTask(e.target.value)} maxLength={10000} placeholder="A clear next step…" /></label><div className="jw-row"><span className="jw-muted">Assigned to you · {project?.name}</span><button className="jw-primary" disabled={busy || !newTask.trim()}>{busy ? 'Creating…' : 'Create task'}</button></div></form>}
           <div className="jw-table-label"><span>Task and next step</span><span>Status / time</span></div>
-          {!tasks.length && <div className="jw-empty"><h3>{search ? 'No tasks match that search.' : data.projects.length ? 'A little breathing room.' : 'Your workspace is ready for its first project.'}</h3><p>{search ? 'Try another word or choose a different view.' : projectId && writable ? 'Add a task when you are ready to begin.' : 'Choose a project or another view to explore your work.'}</p></div>}
-          <div className="jw-task-list">{tasks.map(t => { const p = data.projects.find(p => p.id === t.project_id)!; const status = data.statuses.find(s => s.id === t.status_id); return <article key={t.id} className={`jw-task${taskId === t.id ? ' jw-task-selected' : ''}`}><button className="jw-task-main" onClick={() => setTaskId(t.id)}><span className={`jw-status-dot${done.has(t.status_id) ? ' jw-done' : ''}`} /><span><strong>{title(t)}</strong><small>{projectId ? t.own ? 'Assigned to you' : t.assignee || 'Team task' : p.name}{t.due_date ? ` · Due ${t.due_date}` : ''}</small></span></button><span className="jw-status-label">{status?.name || 'Unclassified'}</span><span className="jw-hours">{hours(t.seconds)}</span>{t.own && p.writable && !t.time_locked && <button className={`jw-timer${t.running_since ? ' jw-timer-running' : ''}`} disabled={busy || (!!running && running.id !== t.id)} onClick={() => void run(() => host.action(t.id, { action: t.running_since ? 'stop' : 'start' }))} aria-label={`${t.running_since ? 'Stop' : 'Start'} timer for ${title(t)}`}><Icon name="clock" /></button>}</article>; })}</div>
-          <footer className="jw-footer"><span>{tasks.length} visible task{tasks.length === 1 ? '' : 's'}</span><span>Live from Invoice Ninja · {new Date(data.loaded_at * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span></footer>
+          {!tasks.length && !refreshing && search === appliedSearch && <div className="jw-empty"><h3>{search ? 'No tasks match that search.' : data.projects.length ? 'A little breathing room.' : 'Your workspace is ready for its first project.'}</h3><p>{search ? 'Try another word or choose a different view.' : projectId && writable ? 'Add a task when you are ready to begin.' : 'Choose a project or another view to explore your work.'}</p></div>}
+          <div className="jw-task-list">{tasks.map(t => { const p = data.projects.find(p => p.id === t.project_id)!; const status = data.statuses.find(s => s.id === t.status_id); return <article key={t.id} className={`jw-task${taskId === t.id ? ' jw-task-selected' : ''}`}><button className="jw-task-main" onClick={() => setTaskId(t.id)}><span className={`jw-status-dot${done.has(t.status_id) ? ' jw-done' : ''}`} /><span><strong>{title(t)}</strong><small>{projectId ? t.own ? 'Assigned to you' : t.assignee || 'Team task' : p.name}{t.due_date ? ` · Due ${t.due_date.split('T')[0]}` : ''}</small></span></button><span className="jw-status-label">{status?.name || 'Unclassified'}</span><span className="jw-hours">{hours(t.seconds)}</span>{t.own && p.writable && !t.time_locked && <button className={`jw-timer${t.running_since ? ' jw-timer-running' : ''}`} disabled={busy || (!!running && running.id !== t.id)} onClick={() => void run(() => host.action(t.id, { action: t.running_since ? 'stop' : 'start' }))} aria-label={`${t.running_since ? 'Stop' : 'Start'} timer for ${title(t)}`}><Icon name="clock" /></button>}</article>; })}</div>
+          {data.has_more && <p className="jw-more"><button className="jw-secondary" disabled={refreshing || limit >= 2000} onClick={() => setLimit(value => Math.min(2000, value + 200))}>{limit >= 2000 ? 'More history is available in the team app' : refreshing ? 'Loading…' : 'Load more tasks'}</button></p>}
+          <footer className="jw-footer"><span>{tasks.length} shown · {data.tasks_total} matching task{data.tasks_total === 1 ? '' : 's'}</span><span>Live from Invoice Ninja · {new Date(data.loaded_at * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span></footer>
         </section>
         {selectedTask && <TaskPanel key={selectedTask.id} task={selectedTask} project={data.projects.find(p => p.id === selectedTask.project_id)!} data={data} host={host} run={run} onClose={() => setTaskId(null)} />}
       </div>

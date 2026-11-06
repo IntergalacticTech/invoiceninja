@@ -10,7 +10,8 @@ export interface Task {
 export interface Status { id: string; name: string; order: number }
 export interface Snapshot {
   identity: {id: string; name: string; is_admin: boolean};
-  projects: Project[]; tasks: Task[]; statuses: Status[];
+  projects: Project[]; tasks: Task[]; running_tasks: Task[]; statuses: Status[];
+  counts: {open: number; mine: number; overdue: number}; tasks_total: number; has_more: boolean;
   evaluation: boolean; source_url: string; loaded_at: number;
 }
 export interface Note { id: string; author: string; body: string; created_at: string }
@@ -19,13 +20,14 @@ export interface AccessUser {
   projects: {project_id: string; role: string}[];
 }
 export interface Host {
-  load(): Promise<Snapshot>;
-  create(projectId: string, description: string, statusId?: string): Promise<unknown>;
+  load(options?: {projectId?: string | null; view?: string; limit?: number; search?: string}): Promise<Snapshot>;
+  create(projectId: string, description: string, statusId?: string, requestId?: string): Promise<unknown>;
   action(taskId: string, body: Record<string, unknown>): Promise<unknown>;
   notes(taskId: string): Promise<Note[]>;
-  addNote(taskId: string, body: string): Promise<unknown>;
+  addNote(taskId: string, body: string, requestId?: string): Promise<unknown>;
   access?(): Promise<AccessUser[]>;
   setAccess?(userId: string, projects: AccessUser['projects']): Promise<unknown>;
+  juliaUrl?: string;
   ask?(question: string): void;
   select?(projectId: string | null, taskId: string | null): void;
 }

@@ -161,4 +161,37 @@ class ProjectAccessTest extends TestCase
         $this->assertGreaterThan(0, $logs[0][1]);
         $this->assertSame('Test work', $logs[0][2]);
     }
+
+    public function test_create_and_note_retries_return_the_original_effect(): void
+    {
+        $this->project->custom_value4 = 'julia-workspace-pilot';
+        $this->project->save();
+        $this->grant();
+        $body = ['project_id' => $this->project->hashed_id, 'description' => 'A single task', 'request_id' => (string) Str::uuid()];
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken]);
+        $first = $this->postJson('/api/v1/victory/workspace/tasks', $body)->assertCreated()->json('data.id');
+        $this->postJson('/api/v1/victory/workspace/tasks', $body)->assertCreated()->assertJsonPath('data.id', $first);
+        $this->assertSame(1, Task::where('company_id', $this->company->id)->where('description', 'A single task')->count());
+        $this->postJson('/api/v1/victory/workspace/tasks', [...$body, 'description' => 'Changed payload'])->assertConflict();
+        $note = ['body' => 'A single note', 'request_id' => (string) Str::uuid()];
+        $path = '/api/v1/victory/tasks/' . $first . '/notes';
+        $id = $this->postJson($path, $note)->assertCreated()->json('data.id');
+        $this->postJson($path, $note)->assertCreated()->assertJsonPath('data.id', $id);
+        $this->assertSame(1, DB::table('victory_task_notes')->where('id', $id)->count());
+    }
+
+    public function test_bounded_views_report_exact_totals_and_keep_the_running_timer(): void
+    {
+        $this->grant();
+        for ($i = 0; $i < 3; $i++) {
+            Task::factory()->create(['company_id' => $this->company->id, 'project_id' => $this->project->id,
+                'client_id' => $this->client->id, 'user_id' => $this->member->id, 'assigned_user_id' => $this->member->id,
+                'description' => 'Bounded task ' . $i, 'time_log' => $i === 0 ? '[[100,0,"running",true]]' : '[]']);
+        }
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->getJson('/api/v1/victory/workspace?limit=1')
+            ->assertOk()->assertJsonCount(1, 'data.tasks')->assertJsonPath('data.tasks_total', 3)->assertJsonPath('data.has_more', true)
+            ->assertJsonCount(1, 'data.running_tasks');
+        $this->getJson('/api/v1/victory/workspace?view=done')->assertOk()->assertJsonCount(0, 'data.tasks')->assertJsonCount(1, 'data.running_tasks');
+        $this->getJson('/api/v1/victory/workspace?search=Bounded%20task%202')->assertOk()->assertJsonPath('data.tasks_total', 1);
+    }
 }

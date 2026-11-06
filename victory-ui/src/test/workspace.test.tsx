@@ -7,6 +7,8 @@ const snapshot: Snapshot = {
   identity: { id: 'me', name: 'A teammate', is_admin: false },
   projects: [{ id: 'p1', name: 'Pilot project', client: 'Internal', pilot: true, role: 'contributor', writable: true }],
   tasks: [{ id: 't1', project_id: 'p1', description: 'Build a useful thing', status_id: 's1', updated_at: 100, own: true, assignee: 'A teammate', seconds: 3600, running_since: null, time_locked: false }],
+  running_tasks: [],
+  counts: { open: 1, mine: 1, overdue: 0 }, tasks_total: 1, has_more: false,
   statuses: [{ id: 's1', name: 'Ready', order: 1 }], evaluation: true,
   source_url: 'https://projects.example.com', loaded_at: 100,
 };
@@ -23,7 +25,7 @@ describe('shared workspace', () => {
     await user.click(screen.getByRole('button', { name: 'New task' }));
     await user.type(screen.getByRole('textbox', { name: 'What needs to happen?' }), 'Verify the integration');
     await user.click(screen.getByRole('button', { name: 'Create task' }));
-    await waitFor(() => expect(host.create).toHaveBeenCalledWith('p1', 'Verify the integration', 's1'));
+    await waitFor(() => expect(host.create).toHaveBeenCalledWith('p1', 'Verify the integration', 's1', expect.any(String)));
   });
   it('clears previously loaded data when a refresh fails', async () => {
     const host = makeHost(); const user = userEvent.setup(); render(<Workspace host={host} />);

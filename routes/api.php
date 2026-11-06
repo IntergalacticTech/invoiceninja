@@ -426,6 +426,7 @@ Route::group(['middleware' => ['throttle:api', 'token_auth', \App\Http\Middlewar
     Route::get('victory/access/users', [\App\Http\Controllers\Victory\ProjectAccessController::class, 'index']);
     Route::put('victory/access/users/{user}', [\App\Http\Controllers\Victory\ProjectAccessController::class, 'update']);
 
+    Route::post('victory/workspace/tasks', [\App\Http\Controllers\Victory\WorkspaceTaskController::class, 'store']);
     Route::post('victory/tasks/{task}/workspace', [\App\Http\Controllers\Victory\WorkspaceTaskController::class, 'update']);
 
     // VictoryCTO team app
