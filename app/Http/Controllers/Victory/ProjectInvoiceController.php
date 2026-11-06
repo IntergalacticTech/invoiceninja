@@ -17,7 +17,7 @@ use Illuminate\Support\Str;
 /** Native project invoice composition/calculation, with an explicit reviewed-draft step. */
 class ProjectInvoiceController extends Controller
 {
-    private function authorize(Project $project): void
+    private function authorizeProject(Project $project): void
     {
         abort_unless(auth()->user()->isSuperUser() && (int) $project->company_id === auth()->user()->companyId(), 403);
         abort_unless(!$project->is_deleted && $project->client && !$project->client->is_deleted, 422, 'An active project client is required.');
@@ -50,7 +50,7 @@ class ProjectInvoiceController extends Controller
 
     public function preview(Project $project): \Illuminate\Http\JsonResponse
     {
-        $this->authorize($project);
+        $this->authorizeProject($project);
         $draft = $this->draft($project);
         $user = auth()->user();
         $id = (string) Str::uuid();
@@ -64,7 +64,7 @@ class ProjectInvoiceController extends Controller
 
     public function create(Request $request, Project $project): \Illuminate\Http\JsonResponse
     {
-        $this->authorize($project);
+        $this->authorizeProject($project);
         $data = $request->validate(['preview_id' => ['required', 'uuid']]);
         $user = auth()->user();
         $result = DB::transaction(function () use ($data, $project, $user) {

@@ -121,6 +121,4 @@ jobs:
           vendor/bin/phpunit --no-coverage \
             tests/Feature/Auth/OidcOnlyTest.php \
             tests/Feature/FinancialVisibilityTest.php \
-            tests/Feature/Victory/EvaluationMailTest.php \
-            tests/Feature/Victory/EvaluationFeedbackTest.php \
             tests/Feature/Victory
