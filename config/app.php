@@ -201,6 +201,7 @@ return [
         App\Providers\NinjaTranslationServiceProvider::class,
         App\Providers\StaticServiceProvider::class,
         App\Providers\ScoutServiceProvider::class,
+        App\Providers\VictoryMailServiceProvider::class,
     ],
 
     /*

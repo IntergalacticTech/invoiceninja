@@ -72,6 +72,22 @@ flowchart LR
 
 ## Releases
 
+### Evaluation email
+
+`OIDC_ONLY=true` suppresses invitations/reconfirmation emails, discards old queued
+verification mail, and disables old confirmation/password-setting links. A
+successful OIDC callback records email verification only when the provider's
+verified email matches the local address.
+
+`VICTORY_MAIL_SANDBOX=true` replaces every Laravel mail transport with Mailtrap's
+SMTP sandbox on port 2525, including company SMTP/OAuth settings, on-demand
+mailers and runtime transport macros. Credentials come from `MAIL_USERNAME` and
+`MAIL_PASSWORD`; missing credentials fail closed. The isolated Victory mail
+manager/provider leaves normal transports available when evaluation mode is off.
+`php artisan victory:check-evaluation-mail --send-probe` checks routing and sends
+one synthetic message to the sandbox. It never prints credentials or mail bodies.
+The infrastructure deployment removes SES send permissions during evaluation.
+
 Run **Actions → release → Run workflow** (pick the branch, default
 `victory/team-app`). It creates the next tag `v<upstream version>-victory.<n>`
 (for example `v5.13.49-victory.3`) and runs `build-image` for it. Pushing such a
