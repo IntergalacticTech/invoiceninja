@@ -177,6 +177,87 @@ class ProjectAccessTest extends TestCase
             ->assertOk()->assertJsonPath('data.time_log', '[[100,800,"private work interval",true]]');
     }
 
+    public function test_legacy_full_replacement_cannot_implicitly_edit_another_persons_time(): void
+    {
+        $this->grant();
+        $task = Task::factory()->create(['company_id' => $this->company->id, 'project_id' => $this->project->id,
+            'client_id' => $this->client->id, 'user_id' => $this->user->id, 'assigned_user_id' => $this->user->id,
+            'time_log' => '[[100,200,"kept",true]]']);
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->putJson('/api/v1/tasks/' . $task->hashed_id,
+            ['description' => 'Shared work'])->assertForbidden();
+        $this->assertSame('[[100,200,"kept",true]]', $task->fresh()->time_log);
+    }
+
+    public function test_legacy_creation_cannot_attribute_time_to_another_person(): void
+    {
+        $this->grant();
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->postJson('/api/v1/tasks',
+            ['project_id' => $this->project->hashed_id, 'client_id' => $this->client->hashed_id,
+             'description' => 'Cannot create another person time', 'assigned_user_id' => $this->user->hashed_id,
+             'time_log' => '[[100,200,"forged",true]]'])->assertForbidden();
+        $this->assertSame(0, Task::where('description', 'Cannot create another person time')->count());
+    }
+
+    public function test_legacy_reassignment_cannot_change_time_ownership(): void
+    {
+        $this->grant();
+        $task = Task::factory()->create(['company_id' => $this->company->id, 'project_id' => $this->project->id,
+            'client_id' => $this->client->id, 'user_id' => $this->member->id, 'assigned_user_id' => $this->member->id,
+            'time_log' => '[[100,200,"kept",true]]']);
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->putJson('/api/v1/tasks/' . $task->hashed_id,
+            ['assigned_user_id' => $this->user->hashed_id, 'time_log' => '[[100,200,"kept",true]]'])->assertForbidden();
+        $this->assertSame($this->member->id, $task->fresh()->assigned_user_id);
+        $this->assertSame('[[100,200,"kept",true]]', $task->fresh()->time_log);
+    }
+
+    public function test_legacy_delivery_writes_cannot_change_financial_fields_or_project_binding(): void
+    {
+        $this->grant();
+        $task = Task::factory()->create(['company_id' => $this->company->id, 'project_id' => $this->project->id,
+            'client_id' => $this->client->id, 'user_id' => $this->member->id, 'assigned_user_id' => $this->member->id,
+            'time_log' => '[[100,200,"kept",true]]', 'rate' => 150]);
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->putJson('/api/v1/tasks/' . $task->hashed_id,
+            ['rate' => 999, 'time_log' => $task->time_log])->assertForbidden();
+        $this->assertEquals(150, $task->fresh()->rate);
+        $this->putJson('/api/v1/tasks/' . $task->hashed_id,
+            ['company_id' => $this->company->id, 'time_log' => $task->time_log])->assertForbidden();
+        $this->assertSame('[[100,200,"kept",true]]', $task->fresh()->time_log);
+        $other = Project::factory()->create(['company_id' => $this->company->id,
+            'client_id' => $this->client->id, 'user_id' => $this->user->id]);
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->putJson('/api/v1/victory/access/users/' . $this->member->hashed_id,
+            ['projects' => [['project_id' => $this->project->hashed_id, 'role' => 'contributor'],
+                            ['project_id' => $other->hashed_id, 'role' => 'contributor']]])->assertOk();
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->putJson('/api/v1/tasks/' . $task->hashed_id,
+            ['project_id' => $other->hashed_id, 'time_log' => $task->time_log])->assertForbidden();
+        $this->assertSame($this->project->id, $task->fresh()->project_id);
+    }
+
+    public function test_standalone_legacy_owned_timer_still_works_under_project_policy(): void
+    {
+        $this->grant();
+        $created = $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->postJson('/api/v1/tasks',
+            ['project_id' => $this->project->hashed_id, 'client_id' => $this->client->hashed_id,
+             'description' => 'Own legacy tracker', 'assigned_user_id' => $this->member->hashed_id,
+             'meta' => ['avaza' => ['title' => 'Own legacy tracker']]])->assertOk()->json('data.id');
+        $this->putJson('/api/v1/tasks/' . $created . '?start=true', [])->assertOk();
+        $task = Task::find($this->decodePrimaryKey($created));
+        $this->assertSame(0, json_decode($task->time_log, true)[0][1]);
+        $this->putJson('/api/v1/tasks/' . $created . '?stop=true', [])->assertOk();
+        $this->assertGreaterThan(0, json_decode($task->fresh()->time_log, true)[0][1]);
+    }
+
+    public function test_client_settings_do_not_reveal_rate_overrides_to_project_members(): void
+    {
+        $this->grant('viewer');
+        config(['ninja.hide_financials_from_non_admins' => true]);
+        $this->client->settings = (object) ['default_task_rate' => 987654];
+        $this->client->save();
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->getJson('/api/v1/clients')
+            ->assertOk()->assertDontSee('987654');
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->getJson('/api/v1/clients')
+            ->assertOk()->assertSee('987654');
+    }
+
     public function test_create_and_note_retries_return_the_original_effect(): void
     {
         $this->project->custom_value4 = 'julia-workspace-pilot';
