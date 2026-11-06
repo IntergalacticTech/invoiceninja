@@ -156,3 +156,8 @@ With project enforcement enabled, legacy timer starts and active time-log writes
 lock the time owner and use the same competing-timer check as workspace
 commands, including for administrators. The shared Workspace screen uses its
 own timer controls; the legacy tracker remains on the older team screens.
+
+Timer operations normalize the single active interval to the end of a task log
+without changing interval values. This avoids the upstream equal-timestamp sort
+edge case on repeated start/stop cycles. Timer reads use current row locks after
+the owner lock; multiple existing active intervals require explicit Time review.

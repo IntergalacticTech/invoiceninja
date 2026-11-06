@@ -311,6 +311,44 @@ class ProjectAccessTest extends TestCase
         $this->assertEquals(987654, $this->company->fresh()->settings->default_task_rate);
     }
 
+    public function test_both_timer_routes_stop_a_single_active_interval_that_is_not_last(): void
+    {
+        $this->grant();
+        foreach ([false, true] as $native) {
+            $now = time();
+            $task = Task::factory()->create(['company_id' => $this->company->id, 'project_id' => $this->project->id,
+                'client_id' => $this->client->id, 'user_id' => $this->member->id, 'assigned_user_id' => $this->member->id,
+                'time_log' => json_encode([[$now, 0, 'running', false], [$now, $now, 'completed', false]])]);
+            $this->withHeaders(['X-API-TOKEN' => $this->memberToken]);
+            if ($native) {
+                $this->putJson('/api/v1/tasks/' . $task->hashed_id . '?stop=true', [])->assertOk();
+            } else {
+                $this->postJson('/api/v1/victory/tasks/' . $task->hashed_id . '/workspace', ['action' => 'stop'])->assertOk();
+            }
+            $entries = json_decode($task->fresh()->time_log, true);
+            $this->assertCount(2, $entries);
+            $this->assertCount(0, array_filter($entries, fn ($entry) => (int) $entry[1] === 0));
+        }
+    }
+
+    public function test_legacy_save_keeps_one_active_interval_last_even_with_later_closed_history(): void
+    {
+        $this->grant();
+        $later = time() + 3600;
+        $task = Task::factory()->create(['company_id' => $this->company->id, 'project_id' => $this->project->id,
+            'client_id' => $this->client->id, 'user_id' => $this->member->id, 'assigned_user_id' => $this->member->id,
+            'time_log' => json_encode([[$later, $later, 'existing completed interval', false]]), 'invoice_id' => null]);
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->putJson('/api/v1/tasks/' . $task->hashed_id . '?start=true', [])->assertOk();
+        $entries = json_decode($task->fresh()->time_log, true);
+        $this->assertSame(0, $entries[count($entries) - 1][1]);
+        $this->assertTrue((bool) $task->fresh()->is_running);
+        $this->putJson('/api/v1/tasks/' . $task->hashed_id . '?stop=true', [])->assertOk();
+        $entries = json_decode($task->fresh()->time_log, true);
+        $this->assertCount(0, array_filter($entries, fn ($entry) => (int) $entry[1] === 0));
+        $this->assertContains([$later, $later, 'existing completed interval', false], $entries);
+        $this->assertFalse((bool) $task->fresh()->is_running);
+    }
+
     public function test_create_and_note_retries_return_the_original_effect(): void
     {
         $this->project->custom_value4 = 'julia-workspace-pilot';

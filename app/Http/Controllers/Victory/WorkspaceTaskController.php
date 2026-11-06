@@ -70,6 +70,7 @@ class WorkspaceTaskController extends Controller
             } else {
                 abort_unless((int) ($current->assigned_user_id ?: $current->user_id) === $user->id, 403, 'Timers must use your own task.');
                 abort_if($current->invoice_id, 409, 'This task is locked for time tracking.');
+                WorkspaceCommands::normalizeRunningInterval($current);
                 $repository = app(TaskRepository::class);
                 if ($data['action'] === 'start') {
                     WorkspaceCommands::requireNoCompetingTimer($user->companyId(), $user->id, $current->id);
@@ -77,6 +78,7 @@ class WorkspaceTaskController extends Controller
                 } else {
                     $repository->stop($current);
                 }
+                WorkspaceCommands::normalizeRunningInterval($current);
                 if (isset($data['note'])) {
                     $logs = json_decode($current->time_log ?: '[]', true) ?: [];
                     if ($logs) {
