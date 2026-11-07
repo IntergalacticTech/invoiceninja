@@ -29,7 +29,8 @@ class TeamTaskController extends BaseController
         $query = Task::where('company_id', auth()->user()->companyId())->where('is_deleted', false);
         $projects = Project::where('company_id', auth()->user()->companyId())->where('is_deleted', false);
         if (!empty($input['project_tasks'])) {
-            $project = $projects->findOrFail($this->decodePrimaryKey($input['project_tasks']));
+            $project = $projects->find($this->decodePrimaryKey($input['project_tasks']));
+            abort_unless($project, 404);
             $query->where('project_id', $project->id);
         } else {
             $query->whereIn('project_id', $projects->select('id'));
