@@ -72,6 +72,7 @@ export interface Client {
   id: string;
   name: string;
   display_name?: string;
+  website?: string;
   archived_at?: number;
 }
 
