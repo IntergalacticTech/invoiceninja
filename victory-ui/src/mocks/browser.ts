@@ -41,7 +41,7 @@ export async function startMockWorker(): Promise<void> {
   save();
   const worker = setupWorker(...makeHandlers(() => mockDb, save));
   await worker.start({
-    serviceWorker: { url: `${import.meta.env.BASE_URL}mockServiceWorker.js` },
+    serviceWorker: { url: '/mockServiceWorker.js', options: { scope: '/' } },
     onUnhandledRequest: 'bypass',
     quiet: true,
   });

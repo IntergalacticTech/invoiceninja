@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { setUnauthorizedHandler } from './api/client';
 import { SessionProvider, useSession } from './auth/session';
@@ -15,7 +15,7 @@ import { MyTasksPage } from './pages/MyTasksPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { ProjectPage } from './pages/ProjectPage';
 import { ExpensesPage } from './pages/ExpensesPage';
-import { ReportsPage } from './pages/ReportsPage';
+const ReportsPage = lazy(() => import('./pages/ReportsPage').then(module => ({ default: module.ReportsPage })));
 import { TimePage } from './pages/TimePage';
 import { navigate, useRoute, type Route } from './router';
 import { clearToasts } from './toasts';
@@ -28,7 +28,7 @@ const ROUTES: Record<string, (r: Route) => ReactNode> = {
   tasks: () => <MyTasksPage />,
   expenses: () => <ExpensesPage />,
   time: (r) => <TimePage week={r.segments[1]} />,
-  reports: () => <ReportsPage />,
+  reports: () => <Suspense fallback={<p role="status">Loading reports…</p>}><ReportsPage /></Suspense>,
 };
 
 function Shell({ onSignOut }: { onSignOut: () => void }) {

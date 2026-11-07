@@ -336,6 +336,9 @@ img.av { object-fit: cover; flex-shrink: 0; }
 .mention-suggestions button { display:flex; justify-content:space-between; width:100%; gap:1rem; padding:.5rem; text-align:left; border:0; background:transparent; color:var(--ink); }
 .mention-suggestions [aria-selected=true] button, .mention-suggestions button:hover { background:var(--accent-soft); }
 .mention-suggestions small { color:var(--muted); }
+.report-grid { height:680px; width:100%; margin:1rem 0 2rem; background:var(--surface); }
+.report-grid .report-rollup { font-weight:650; background:var(--accent-soft); }
+@media(max-width:700px) { .report-grid { height:560px; } }
 
 /* Keep long pickers and data grids inside the page at every viewport width. */
 main .wrap { grid-template-columns: minmax(0, 1fr); }

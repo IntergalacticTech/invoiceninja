@@ -39,6 +39,9 @@ function mockNavigations(): Plugin {
           res.end();
           return;
         }
+        if (url === '/mockServiceWorker.js') req.url = '/team/mockServiceWorker.js';
+        // Match production's clean links when a local page is refreshed.
+        if (/^\/(projects|project|tasks|time|reports|expenses|workspace|dashboard)(?:[/?]|$)/.test(url)) req.url = `/team${url}`;
         next();
       });
     },
@@ -52,6 +55,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: '/team/',
+    define: { 'globalThis.__MUI_X_TELEMETRY_DISABLED__': 'true' },
     plugins: [react(), ...(isMock ? [mockNavigations()] : [])],
     // The msw service worker only ships in mock mode; production dist/ has no public files.
     publicDir: isMock ? 'mock-public' : false,
