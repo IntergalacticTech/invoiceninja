@@ -430,10 +430,12 @@ Route::group(['middleware' => ['throttle:api', 'token_auth', \App\Http\Middlewar
     Route::post('victory/tasks/{task}/workspace', [\App\Http\Controllers\Victory\WorkspaceTaskController::class, 'update']);
 
     // VictoryCTO team app
+    Route::get('victory/tasks', [\App\Http\Controllers\Victory\TeamTaskController::class, 'index']);
     Route::get('victory/projects/{project}/people', [\App\Http\Controllers\Victory\ProjectPeopleController::class, 'index']);
     Route::put('victory/projects/{project}/people', [\App\Http\Controllers\Victory\ProjectPeopleController::class, 'update']);
     Route::get('victory/projects/{project}/workflow', [\App\Http\Controllers\Victory\ProjectWorkflowController::class, 'index']);
     Route::put('victory/projects/{project}/workflow', [\App\Http\Controllers\Victory\ProjectWorkflowController::class, 'update']);
+    Route::post('victory/projects/{project}/source-statuses', [\App\Http\Controllers\Victory\ProjectWorkflowController::class, 'sourceStatuses']);
     Route::post('victory/tasks/{task}/workflow', [\App\Http\Controllers\Victory\ProjectWorkflowController::class, 'task']);
     Route::get('victory/expenses', [\App\Http\Controllers\Victory\TeamExpenseController::class, 'index']);
     Route::post('victory/invoices/projects/{project}/preview', [\App\Http\Controllers\Victory\ProjectInvoiceController::class, 'preview']);

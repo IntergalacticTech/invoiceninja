@@ -84,6 +84,6 @@ describe('task details', () => {
     await within(dialog).findByText('Conversation history has not been imported for this task yet.');
     expect(within(dialog).getByRole('heading', { name: 'Monthly Theme & Plugin Updates' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Close task details' }));
-    await waitFor(() => expect(window.location.hash).toBe('#/projects/p_edv'));
+    await waitFor(() => expect(window.location.pathname).toBe('/projects/p_edv'));
   });
 });

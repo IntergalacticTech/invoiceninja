@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQueries, useQuery } from '@tanstack/react-query';
 import {
   countTasks,
@@ -70,10 +70,20 @@ export function usePeople(extraTasks: Task[] = []): (id: string) => string {
   }, [data, extraTasks, user]);
 }
 
+export function useDebounced<T>(value: T, delay = 250): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => { const id = setTimeout(() => setDebounced(value), delay); return () => clearTimeout(id); }, [value, delay]);
+  return debounced;
+}
+export function useProjectWorkflow(projectId?: string) {
+  return useQuery({ queryKey: ['project-workflow', projectId], queryFn: () => getProjectWorkflow(projectId ?? ''), enabled: Boolean(projectId), staleTime: FIVE_MIN });
+}
 export function useStatusGroups(projectId?: string): { groups: StatusGroup[]; isPending: boolean } {
-  const q = useQuery({ queryKey: ['task_statuses', projectId ?? 'all'], queryFn: () => projectId ? getProjectWorkflow(projectId).then(r => r.statuses) : getTaskStatuses(), staleTime: FIVE_MIN });
-  const groups = useMemo(() => buildStatusGroups(q.data ?? []), [q.data]);
-  return { groups, isPending: q.isPending };
+  const workflow = useProjectWorkflow(projectId);
+  const all = useQuery({ queryKey: ['task_statuses', 'all'], queryFn: getTaskStatuses, enabled: !projectId, staleTime: FIVE_MIN });
+  const data = projectId ? workflow.data?.statuses : all.data;
+  const groups = useMemo(() => buildStatusGroups(data ?? []), [data]);
+  return { groups, isPending: projectId ? workflow.isPending : all.isPending };
 }
 
 /* ---------- time entries ---------- */

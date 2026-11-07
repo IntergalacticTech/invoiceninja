@@ -46,6 +46,7 @@ class ProjectWorkflowController extends Controller
             'statuses.*.color' => ['required', 'regex:/^#[0-9a-fA-F]{6}$/'], 'statuses.*.is_done' => ['required', 'boolean'],
             'sections' => ['present', 'array', 'max:100'], 'sections.*' => ['required', 'string', 'max:120', 'distinct']]);
         abort_unless(collect($data['statuses'])->map(fn ($s) => mb_strtolower(trim($s['name'])))->unique()->count() === count($data['statuses']), 422, 'Status names must be unique within this project.');
+        abort_if(collect($data['statuses'])->pluck('id')->filter()->duplicates()->isNotEmpty(), 422, 'Each status can only appear once.');
         DB::transaction(function () use ($data, $project, $user) {
             Project::where('id', $project->id)->lockForUpdate()->firstOrFail();
             $statuses = [];
@@ -69,6 +70,30 @@ class ProjectWorkflowController extends Controller
                 ['configuration' => json_encode(['statuses' => $statuses, 'sections' => array_map('trim', $data['sections'])]), 'updated_at' => now(), 'created_at' => now()]);
         });
         return $this->index($project);
+    }
+
+    /** One-time migration adapter: updates source task statuses without touching time or billing. */
+    public function sourceStatuses(Request $request, Project $project): \Illuminate\Http\JsonResponse
+    {
+        $user = auth()->user();
+        abort_unless($user->isSuperUser() && (int) $project->company_id === $user->companyId(), 403);
+        $input = $request->validate(['source_project_id' => ['required', 'integer', 'min:1'],
+            'tasks' => ['required', 'array', 'min:1', 'max:500'], 'tasks.*.source_task_id' => ['required', 'integer', 'min:1', 'distinct'],
+            'tasks.*.status_id' => ['required', 'string']]);
+        abort_unless((string) $project->custom_value1 === (string) $input['source_project_id'], 422, 'Source project does not match.');
+        $updated = DB::transaction(function () use ($input, $project, $user) {
+            Project::where('id', $project->id)->lockForUpdate()->firstOrFail();
+            $ids = collect($input['tasks'])->pluck('status_id')->unique()->mapWithKeys(fn ($id) => [$id => $this->decodePrimaryKey($id)]);
+            abort_unless(TaskStatus::where('company_id', $user->companyId())->whereIn('id', $ids->values())->count() === $ids->count(), 422, 'A status is unavailable.');
+            $count = 0;
+            foreach ($input['tasks'] as $row) {
+                $count += Task::where('company_id', $user->companyId())->where('project_id', $project->id)->where('is_deleted', false)
+                    ->where('custom_value1', 'like', $row['source_task_id'] . ':%')->where(fn ($q) => $q->whereNull('status_id')->orWhere('status_id', '!=', $ids[$row['status_id']]))
+                    ->update(['status_id' => $ids[$row['status_id']], 'updated_at' => now()]);
+            }
+            return $count;
+        });
+        return response()->json(['data' => ['updated' => $updated]]);
     }
 
     public function task(Request $request, Task $task): \Illuminate\Http\JsonResponse

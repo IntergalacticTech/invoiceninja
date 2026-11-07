@@ -46,21 +46,21 @@ export interface TaskQuery {
   filter?: string;
   project_tasks?: string;
   assigned_user?: string;
-  /** Comma separated status ids. Note: the server also drops invoiced tasks with this filter. */
+  /** Comma separated native status ids; invoiced tasks remain visible. */
   task_status?: string;
   sort?: string;
   include?: string;
 }
 
 export const listTasks = (q: TaskQuery, perPage = 500, maxPages = 10) =>
-  fetchAll<Task>('/tasks', { status: 'active', ...q }, perPage, maxPages);
+  fetchAll<Task>('/victory/tasks', { status: 'active', ...q }, perPage, maxPages);
 
 export const listTasksPage = (q: TaskQuery, perPage: number) =>
-  api<ListResponse<Task>>('/tasks', { query: { status: 'active', ...q, per_page: perPage, page: 1 } });
+  api<ListResponse<Task>>('/victory/tasks', { query: { status: 'active', ...q, per_page: perPage, page: 1 } });
 
 /** Total matching tasks without downloading them (per_page=1, read the pagination total). */
 export async function countTasks(q: TaskQuery): Promise<number> {
-  const res = await api<ListResponse<Task>>('/tasks', { query: { status: 'active', ...q, per_page: 1 } });
+  const res = await api<ListResponse<Task>>('/victory/tasks', { query: { status: 'active', ...q, per_page: 1 } });
   return res.meta?.pagination?.total ?? res.data.length;
 }
 

@@ -28,7 +28,7 @@ class ProjectPeopleController extends Controller
     {
         $actor = auth()->user();
         abort_unless($actor->isSuperUser() && $project->company_id === $actor->companyId(), 403);
-        $input = $request->validate(['members' => ['present', 'array', 'max:500'],
+        $input = $request->validate(['mode' => ['sometimes', 'in:replace,add_missing'], 'members' => ['present', 'array', 'max:500'],
             'members.*.user_id' => ['required', 'string', 'distinct'], 'members.*.role' => ['required', 'in:viewer,contributor,manager']]);
         DB::transaction(function () use ($input, $project, $actor) {
             Project::where('id', $project->id)->lockForUpdate()->firstOrFail();
@@ -37,9 +37,9 @@ class ProjectPeopleController extends Controller
             $members = CompanyUser::where('company_id', $actor->companyId())->whereIn('user_id', $oldIds->merge($ids)->unique())
                 ->orderBy('user_id')->lockForUpdate()->get();
             foreach ($ids as $id) abort_unless($members->contains(fn ($cu) => $cu->user_id === $id && !$cu->is_locked), 422, 'A team member is unavailable.');
-            DB::table('victory_project_access')->where('company_id', $actor->companyId())->where('project_id', $project->id)->delete();
+            if (($input['mode'] ?? 'replace') === 'replace') DB::table('victory_project_access')->where('company_id', $actor->companyId())->where('project_id', $project->id)->delete();
             foreach ($input['members'] as $row) {
-                DB::table('victory_project_access')->insert(['company_id' => $actor->companyId(), 'project_id' => $project->id,
+                DB::table('victory_project_access')->insertOrIgnore(['company_id' => $actor->companyId(), 'project_id' => $project->id,
                     'user_id' => $this->decodePrimaryKey($row['user_id']), 'role' => $row['role'], 'created_at' => now(), 'updated_at' => now()]);
             }
             DB::table('victory_access_audit')->insert(['company_id' => $actor->companyId(), 'actor_id' => $actor->id,

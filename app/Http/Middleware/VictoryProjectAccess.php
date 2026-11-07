@@ -115,7 +115,7 @@ class VictoryProjectAccess
                 abort_unless(Project::find($this->decodePrimaryKey($match[1])), 404);
                 return;
             }
-            if ($path === 'victory/expenses') return;
+            if (in_array($path, ['victory/expenses', 'victory/tasks'], true)) return;
             if (preg_match('#^documents/([^/]+)/download$#', $path, $match)) {
                 $document = Document::where('company_id', $access->companyId)->find($this->decodePrimaryKey($match[1]));
                 abort_unless($document && $document->documentable_type === Task::class

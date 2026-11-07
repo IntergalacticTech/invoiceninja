@@ -68,6 +68,48 @@ class EvaluationFeedbackTest extends TestCase
             'invoice_id' => null, 'rate' => 100, 'time_log' => '[[1793624400,1793628000,"Implementation notes",true]]', 'is_running' => false]);
     }
 
+    public function test_team_task_browsing_keeps_invoiced_history_and_does_not_search_private_time_notes(): void
+    {
+        $this->grant(); $task = $this->task();
+        $status = TaskStatus::factory()->create(['company_id' => $this->company->id, 'user_id' => $this->user->id]);
+        $task->status_id = $status->id; $task->save();
+        $path = '/api/v1/victory/tasks?project_tasks=' . $this->project->hashed_id . '&task_status=' . $status->hashed_id;
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->getJson($path)->assertOk()->assertJsonCount(1, 'data');
+        $invoice = \App\Factory\InvoiceFactory::create($this->company->id, $this->user->id); $invoice->client_id = $this->client->id; $invoice->save();
+        $task->invoice_id = $invoice->id; $task->save();
+        $this->getJson($path)->assertOk()->assertJsonPath('data.0.id', $task->hashed_id);
+        $this->getJson($path . '&filter=Implementation%20notes')->assertOk()->assertJsonCount(0, 'data');
+        $this->getJson($path . '&filter=Delivery')->assertOk()->assertJsonCount(1, 'data');
+        DB::table('victory_project_access')->where('project_id', $this->project->id)->delete();
+        $this->getJson($path)->assertNotFound();
+    }
+
+    public function test_source_status_restoration_is_scoped_and_changes_no_time_or_billing(): void
+    {
+        $this->project->custom_value1 = '12345'; $this->project->save();
+        $task = $this->task(); $task->custom_value1 = '500:1'; $task->save();
+        $status = TaskStatus::factory()->create(['company_id' => $this->company->id, 'user_id' => $this->user->id]);
+        $before = $task->getAttributes();
+        $path = '/api/v1/victory/projects/' . $this->project->hashed_id . '/source-statuses';
+        $body = ['source_project_id' => 12345, 'tasks' => [['source_task_id' => 500, 'status_id' => $status->hashed_id]]];
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->postJson($path, $body)->assertForbidden();
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->postJson($path, array_replace($body, ['source_project_id' => 999]))->assertStatus(422);
+        $this->postJson($path, $body)->assertOk()->assertJsonPath('data.updated', 1);
+        $this->postJson($path, $body)->assertOk()->assertJsonPath('data.updated', 0);
+        $after = $task->fresh()->getAttributes();
+        foreach (['status_id', 'updated_at'] as $field) { unset($before[$field], $after[$field]); }
+        $this->assertEquals($before, $after);
+    }
+
+    public function test_source_membership_seeding_preserves_existing_manual_roles(): void
+    {
+        $this->grant($this->member, 'viewer'); [$new] = $this->person('New Member');
+        $body = ['mode' => 'add_missing', 'members' => [['user_id' => $this->member->hashed_id, 'role' => 'manager'], ['user_id' => $new->hashed_id, 'role' => 'contributor']]];
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->putJson('/api/v1/victory/projects/' . $this->project->hashed_id . '/people', $body)->assertOk();
+        $this->assertSame('viewer', DB::table('victory_project_access')->where('project_id', $this->project->id)->where('user_id', $this->member->id)->value('role'));
+        $this->assertSame('contributor', DB::table('victory_project_access')->where('project_id', $this->project->id)->where('user_id', $new->id)->value('role'));
+    }
+
     public function test_google_replaces_placeholder_profile_and_verifies_only_provider_email(): void
     {
         $this->member->forceFill(['first_name' => 'New', 'last_name' => 'User', 'avatar' => null, 'email_verified_at' => null])->save();

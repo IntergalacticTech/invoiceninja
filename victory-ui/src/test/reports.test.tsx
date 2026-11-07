@@ -136,24 +136,10 @@ describe('Reports page', () => {
     expect(detail).toContain('Weekly status call,Agenda + notes,yes');
   });
 
-  it('team member: only their own time, no Person filter, by project and week', async () => {
+  it('team members cannot open reports or see the reports menu', async () => {
     renderApp({ as: 'u_sam', hash: '#/reports' });
-    await user_selects_last_30();
-    const table = screen.getByRole('table', { name: 'Timesheet' });
-    await waitFor(() => expect(within(table).getAllByRole('rowheader').length).toBeGreaterThan(1), { timeout: 5000 });
-    expect(screen.queryByLabelText('Person')).not.toBeInTheDocument();
-    expect(screen.getByText(/\(your time\)/)).toBeInTheDocument();
-    const rows = within(table).getAllByRole('rowheader').map((r) => r.textContent);
-    expect(rows).toContain('Young Life - Operational Consulting (YGL-250113)');
-    expect(rows).not.toContain('Endeavor - Ongoing Website Maintenance & Security Monitoring Oversight (EDV-230803)');
-    // Column headers are weeks.
-    expect(within(table).getAllByRole('columnheader').some((h) => /^Wk of /.test(h.textContent ?? ''))).toBe(true);
-    // Never money.
-    expect(document.body.textContent).not.toMatch(/\$|175|12,345/);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Reports are available to administrators');
+    expect(within(screen.getByRole('navigation', { name: 'Main' })).queryByText('Reports')).toBeNull();
+    expect(screen.queryByRole('table', { name: 'Timesheet' })).toBeNull();
   });
 });
-
-async function user_selects_last_30() {
-  const { default: userEvent } = await import('@testing-library/user-event');
-  await userEvent.setup().selectOptions(await screen.findByLabelText('Period'), 'last_30');
-}

@@ -5,7 +5,7 @@ import { SHOW_BUDGET_HOURS } from '../config';
 import { People } from '../components/Avatar';
 import { Seg } from '../components/Seg';
 import { ago, fmtH, hoursOf } from '../domain/dates';
-import { openGroups, type StatusGroup } from '../domain/statuses';
+import { doneGroups, openGroups, type StatusGroup } from '../domain/statuses';
 import {
   clientName,
   useClientMap,
@@ -207,7 +207,8 @@ export function ProjectsPage() {
   const clients = useClientMap();
   const entriesQ = useLast30Days();
   const myTasks = useMyRecentTasks();
-  const { groups } = useStatusGroups();
+  const { groups: statuses } = useStatusGroups();
+  const groups = useMemo(() => [openGroups(statuses), doneGroups(statuses)].flatMap((choices, i) => choices[0] ? [{ ...choices[0], key: i ? 'done' : 'open', label: i ? 'Done' : 'Open', statusIds: choices.flatMap(g => g.statusIds), isDone: Boolean(i) }] : []), [statuses]);
   const nameOf = usePeople();
 
   const [mine, setMine] = useState(false);
