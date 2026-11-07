@@ -3,7 +3,7 @@ import { adminHandoff } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { useSession } from '../auth/session';
 import { browser } from '../browser';
-import { ADMIN_APP_URL, OIDC_START_PATH } from '../config';
+import { ADMIN_APP_URL, OIDC_START_PATH, REMOTE_API_ORIGIN, REMOTE_DEVELOPMENT } from '../config';
 import { NAV } from '../nav';
 import { href } from '../router';
 import { notify } from '../toasts';
@@ -77,7 +77,10 @@ export function Header({ current, onSignOut }: { current: string; onSignOut: () 
             {session.name} · {session.canAdmin ? 'admin' : 'team member'}
             <small className="identity-email">{session.user.email}</small>
           </span>
-          <button type="button" className="linkish" onClick={() => browser.assign(OIDC_START_PATH)} title="Refresh your name, email and photo from Google">Refresh profile</button>
+          <button type="button" className="linkish" onClick={() => {
+            if (REMOTE_DEVELOPMENT) browser.open(`${REMOTE_API_ORIGIN}${OIDC_START_PATH}`, '_blank', 'noopener,noreferrer');
+            else browser.assign(OIDC_START_PATH);
+          }} title="Refresh your name, email and photo from Google">Refresh profile</button>
           <button type="button" className="linkish" onClick={onSignOut}>
             Sign out
           </button>

@@ -1,5 +1,5 @@
 /// <reference types="vitest/config" />
-import { defineConfig, loadEnv, type Plugin } from 'vite';
+import { defineConfig, loadEnv, type Plugin, type ProxyOptions } from 'vite';
 import react from '@vitejs/plugin-react';
 
 /**
@@ -52,9 +52,21 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const target = env.VICTORY_API_TARGET;
   const isMock = mode === 'mock';
+  const isRemote = mode === 'remote';
+  const remoteOrigin = 'https://projects.victorycto.com';
+  const proxy: Record<string, string | ProxyOptions> | undefined = isRemote ? {
+    '/api/v1/': {
+      target: remoteOrigin,
+      changeOrigin: true,
+      configure(proxy) {
+        proxy.on('proxyReq', request => request.removeHeader('cookie'));
+        proxy.on('proxyRes', response => { delete response.headers['set-cookie']; });
+      },
+    },
+  } : target && !isMock ? { '/api': target, '/auth': target } : undefined;
 
   return {
-    base: '/team/',
+    base: isRemote ? '/' : '/team/',
     define: { 'globalThis.__MUI_X_TELEMETRY_DISABLED__': 'true' },
     plugins: [react(), ...(isMock ? [mockNavigations()] : [])],
     // The msw service worker only ships in mock mode; production dist/ has no public files.
@@ -66,8 +78,13 @@ export default defineConfig(({ mode }) => {
       target: 'es2022',
     },
     server: {
-      // Optional: point a non-mock dev server at a local Invoice Ninja (never production).
-      proxy: target && !isMock ? { '/api': target, '/auth': target } : undefined,
+      host: '127.0.0.1',
+      port: isRemote ? 5174 : 5173,
+      strictPort: true,
+      cors: false,
+      // Remote mode keeps auth tokens in the browser, like the hosted app.
+      // No credentials are injected into anonymous requests by the dev server.
+      proxy,
     },
     test: {
       environment: 'jsdom',

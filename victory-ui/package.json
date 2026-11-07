@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "vite",
     "dev:mock": "vite --mode mock",
+    "dev:remote": "vite --mode remote",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview",
     "lint": "eslint . --max-warnings=0 && tsc --noEmit -p tsconfig.json",
@@ -22,7 +23,7 @@
     "@mui/material": "7.3.11",
     "@mui/x-data-grid-pro": "8.29.5",
     "@tanstack/react-query": "5.81.5",
-    "@victory/workspace": "file:vendor/victory-workspace-0.2.0.tgz",
+    "@victory/workspace": "file:vendor/victory-workspace-0.2.1.tgz",
     "dompurify": "3.4.17",
     "exceljs": "4.4.0",
     "jspdf": "4.2.1",

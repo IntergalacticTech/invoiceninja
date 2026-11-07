@@ -1,12 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
 import { getOidcConfig } from '../api/endpoints';
 import { browser } from '../browser';
-import { OIDC_START_PATH } from '../config';
+import { OIDC_START_PATH, REMOTE_DEVELOPMENT } from '../config';
+import { RemoteSignIn } from './RemoteSignIn';
 
-/** Password login is disabled server-side (oidc_only); Google via OIDC is the only way in. */
-export function SignIn({ notice }: { notice?: string }) {
-  const config = useQuery({ queryKey: ['oidc_config'], queryFn: getOidcConfig, retry: false, staleTime: Infinity });
+/** Hosted sign-in uses Google; the opt-in local mode connects with a personal API token. */
+export function SignIn({ notice, onConnected = () => window.location.reload() }: { notice?: string; onConnected?: () => void }) {
+  const config = useQuery({ queryKey: ['oidc_config'], queryFn: getOidcConfig, retry: false, staleTime: Infinity, enabled: !REMOTE_DEVELOPMENT });
   const disabled = config.isSuccess && !config.data.oidc_enabled;
+
+  if (REMOTE_DEVELOPMENT) return <RemoteSignIn notice={notice} onConnected={onConnected} />;
 
   return (
     <main className="signin">

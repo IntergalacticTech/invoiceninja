@@ -7,7 +7,7 @@ import { fullName } from '../domain/people';
 import { getToken, setToken } from './token';
 import { errorMessage } from '../api/client';
 import { browser } from '../browser';
-import { OIDC_START_PATH } from '../config';
+import { OIDC_START_PATH, REMOTE_DEVELOPMENT } from '../config';
 
 export interface Session {
   user: User;
@@ -111,7 +111,7 @@ export async function loadSession(): Promise<Session> {
 export function SessionProvider({ children, fallback }: { children: ReactNode; fallback?: ReactNode }) {
   const q = useQuery({ queryKey: ['session'], queryFn: loadSession, staleTime: Infinity, retry: false });
   useEffect(() => {
-    if (!q.data || q.data.name.toLowerCase() !== 'new user' || q.data.user.avatar_url) return;
+    if (REMOTE_DEVELOPMENT || !q.data || q.data.name.toLowerCase() !== 'new user' || q.data.user.avatar_url) return;
     try {
       const key = `victory.google-profile.${q.data.user.id}`;
       if (sessionStorage.getItem(key)) return;

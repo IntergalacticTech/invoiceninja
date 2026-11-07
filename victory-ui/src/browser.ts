@@ -6,8 +6,8 @@ export const browser = {
   assign(url: string): void {
     window.location.assign(url);
   },
-  open(url: string, target: string): Window | null {
-    return window.open(url, target);
+  open(url: string, target: string, features?: string): Window | null {
+    return window.open(url, target, features);
   },
   replaceUrl(url: string): void {
     window.history.replaceState(null, '', url);
