@@ -19,6 +19,7 @@ class ProjectAccessController extends Controller
     {
         $user = auth()->user();
         return response()->json(['data' => ['user_id' => $user->hashed_id, 'name' => $user->name(), 'email' => $user->email,
+            'timezone' => $user->company()->timezone()->name, 'date_format' => app('date_formats')->firstWhere('id', $user->company()->getSetting('date_format_id'))?->format_moment ?: 'MMM D, YYYY',
             'is_admin' => $user->isSuperUser(), 'enforced' => (bool) config('ninja.victory_project_access_enabled', false),
             'projects' => collect(app(ProjectAccess::class)->roles)->map(fn ($role, $id) => ['project_id' => $this->encodePrimaryKey($id), 'role' => $role])->values()]]);
     }

@@ -1,0 +1,224 @@
+import { useEffect, useMemo, useState } from 'react';
+import { keepPreviousData, useQueries, useQuery } from '@tanstack/react-query';
+import {
+  countTasks,
+  getAllProjects,
+  getClients,
+  getProjects,
+  getTaskStatuses,
+  getProjectWorkflow,
+  getTimeEntries,
+  getUsers,
+  listTasks,
+  listTasksPage,
+} from '../api/endpoints';
+import type { Client, Project, Task, User } from '../api/types';
+import { useSession } from '../auth/session';
+import { addDays, todayYmd } from '../domain/dates';
+import { fullName } from '../domain/people';
+import { buildStatusGroups, doneGroups, groupOf, idsOf, openGroups, type StatusGroup } from '../domain/statuses';
+import { lastLogged, parseTimeLog } from '../domain/timeLog';
+import { groupWorkItems } from '../domain/workItems';
+
+const FIVE_MIN = 5 * 60 * 1000;
+
+export function useProjects(includeInactive = false) {
+  const query = useQuery({ queryKey: includeInactive ? ['projects', 'including-inactive'] : ['projects'], queryFn: includeInactive ? getAllProjects : getProjects, staleTime: FIVE_MIN });
+  return { ...query, data: query.isError ? undefined : query.data };
+}
+
+export function useProjectMap(): Map<string, Project> {
+  const { data } = useProjects();
+  return useMemo(() => new Map((data ?? []).map((p) => [p.id, p])), [data]);
+}
+
+/** Every project including archived ones (Reports). Separate key: the rest of the app wants active only. */
+export function useAllProjectsMap(): Map<string, Project> {
+  const { data } = useQuery({ queryKey: ['projects', 'all'], queryFn: getAllProjects, staleTime: FIVE_MIN });
+  return useMemo(() => new Map((data ?? []).map((p) => [p.id, p])), [data]);
+}
+
+export function useClientMap(): Map<string, Client> {
+  const { data } = useQuery({ queryKey: ['clients'], queryFn: getClients, staleTime: FIVE_MIN });
+  return useMemo(() => new Map((data ?? []).map((c) => [c.id, c])), [data]);
+}
+
+export const clientName = (c: Client | undefined) => c?.display_name || c?.name || '';
+
+/**
+ * Names by user id. Admins get everyone from /users; others only themselves (the server scopes
+ * /users to the caller without view_user), so names are also harvested from task includes.
+ */
+export function useUsersQuery() {
+  return useQuery({
+    queryKey: ['users'],
+    queryFn: () => getUsers().catch(() => [] as User[]),
+    staleTime: FIVE_MIN,
+  });
+}
+
+export function usePeople(extraTasks: Task[] = []): (id: string) => string {
+  const { user } = useSession();
+  const { data } = useUsersQuery();
+  return useMemo(() => {
+    const names = new Map<string, string>();
+    for (const u of data ?? []) names.set(u.id, fullName(u));
+    for (const t of extraTasks) {
+      if (t.assigned_user && t.assigned_user_id) names.set(t.assigned_user_id, fullName(t.assigned_user));
+    }
+    names.set(user.id, fullName(user) || 'You');
+    return (id: string) => names.get(id) || 'Team member';
+  }, [data, extraTasks, user]);
+}
+
+export function useDebounced<T>(value: T, delay = 250): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => { const id = setTimeout(() => setDebounced(value), delay); return () => clearTimeout(id); }, [value, delay]);
+  return debounced;
+}
+export function useProjectWorkflow(projectId?: string) {
+  return useQuery({ queryKey: ['project-workflow', projectId], queryFn: () => getProjectWorkflow(projectId ?? ''), enabled: Boolean(projectId), staleTime: FIVE_MIN });
+}
+export function useStatusGroups(projectId?: string): { groups: StatusGroup[]; isPending: boolean } {
+  const workflow = useProjectWorkflow(projectId);
+  const all = useQuery({ queryKey: ['task_statuses', 'all'], queryFn: getTaskStatuses, enabled: !projectId, staleTime: FIVE_MIN });
+  const data = projectId ? workflow.data?.statuses : all.data;
+  const groups = useMemo(() => buildStatusGroups(data ?? []), [data]);
+  return { groups, isPending: projectId ? workflow.isPending : all.isPending };
+}
+
+/* ---------- time entries ---------- */
+
+export function useTimeEntries(startDate: string, endDate: string, userId?: string) {
+  return useQuery({
+    queryKey: ['time_entries', startDate, endDate, userId ?? 'all'],
+    queryFn: () => getTimeEntries({ start_date: startDate, end_date: endDate, user_id: userId }),
+    staleTime: 60 * 1000,
+  });
+}
+
+/** Last 30 days, company timezone. Admins: everyone. Others: the server returns only their own. */
+export function useLast30Days() {
+  const { timezone, canAdmin, user } = useSession();
+  const end = todayYmd(timezone);
+  const start = addDays(end, -29);
+  return useTimeEntries(start, end, canAdmin ? undefined : user.id);
+}
+
+/* ---------- tasks ---------- */
+
+/** The caller's most recently updated tasks: used to find a running timer on load. */
+export function useMyRecentTasks() {
+  const { user } = useSession();
+  return useQuery({
+    queryKey: ['tasks', 'mine', 'recent', user.id],
+    queryFn: () => listTasksPage({ assigned_user: user.id, sort: 'updated_at|desc' }, 50).then((r) => r.data),
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useProjectTasks(projectId: string | undefined, groups: StatusGroup[], doneLimit: number, search = '') {
+  const openIds = idsOf(openGroups(groups)).join(',');
+  const doneIds = idsOf(doneGroups(groups)).join(',');
+  const enabled = Boolean(projectId) && groups.length > 0;
+
+  const open = useQuery({
+    queryKey: ['tasks', 'project', projectId, 'open', openIds, ...(typeof search === 'string' && search ? [search] : [])],
+    queryFn: () =>
+      openIds
+        ? listTasks({ project_tasks: projectId, task_status: openIds, include: 'assigned_user', sort: 'status_order|asc', filter: search })
+        : Promise.resolve([] as Task[]),
+    enabled,
+    staleTime: 30 * 1000,
+  });
+
+  const done = useQuery({
+    queryKey: ['tasks', 'project', projectId, 'done', doneIds, doneLimit, search],
+    queryFn: () =>
+      doneIds
+        ? listTasksPage({ project_tasks: projectId, task_status: doneIds, include: 'assigned_user', sort: 'updated_at|desc', filter: search }, doneLimit)
+        : Promise.resolve({ data: [] as Task[], meta: undefined }),
+    enabled,
+    staleTime: 30 * 1000,
+    placeholderData: keepPreviousData,
+  });
+
+  const tasks = useMemo(() => {
+    if (open.isError || done.isError) return [];
+    const byId = new Map<string, Task>();
+    for (const t of [...(open.data ?? []), ...(done.data?.data ?? [])]) {
+      const seen = byId.get(t.id);
+      if (!seen || t.updated_at >= seen.updated_at) byId.set(t.id, t);
+    }
+    return [...byId.values()];
+  }, [open.data, done.data, open.isError, done.isError]);
+  const doneTotal = done.data?.meta?.pagination?.total ?? done.data?.data.length ?? 0;
+
+  return {
+    tasks,
+    isPending: enabled && (open.isPending || done.isPending),
+    isError: open.isError || done.isError,
+    doneLoaded: done.data?.data.length ?? 0,
+    doneTotal,
+    isFetchingDone: done.isFetching,
+  };
+}
+
+/**
+ * Card counts per status column for one project. Open columns count cards (every person's copies
+ * of a task as one), from the same open-task query the board uses, so the project card and the
+ * board agree. Done columns can hold years of tasks, so they keep the server's cheap total (which
+ * counts copies) rather than downloading them.
+ */
+export function useProjectCounts(projectId: string, groups: StatusGroup[], enabled = true) {
+  const open = openGroups(groups);
+  const openIds = idsOf(open).join(',');
+  const openQ = useQuery({
+    queryKey: ['tasks', 'project', projectId, 'open', openIds],
+    queryFn: () =>
+      openIds
+        ? listTasks({ project_tasks: projectId, task_status: openIds, include: 'assigned_user', sort: 'status_order|asc' })
+        : Promise.resolve([] as Task[]),
+    enabled: enabled && groups.length > 0,
+    staleTime: 30 * 1000,
+  });
+  const done = doneGroups(groups);
+  const doneResults = useQueries({
+    queries: done.map((g) => ({
+      queryKey: ['tasks', 'count', projectId, g.statusIds.join(',')],
+      queryFn: () => countTasks({ project_tasks: projectId, task_status: g.statusIds.join(',') }),
+      staleTime: FIVE_MIN,
+      enabled,
+    })),
+  });
+  const doneKey = doneResults.map((r) => r.data ?? '').join(',');
+  return useMemo(() => {
+    const counts: Record<string, number | undefined> = {};
+    if (openQ.data) {
+      for (const g of open) counts[g.key] = 0;
+      for (const item of groupWorkItems(openQ.data)) {
+        const g = groupOf(open, item.statusId);
+        if (g) counts[g.key] = (counts[g.key] ?? 0) + 1;
+      }
+    }
+    done.forEach((g, i) => {
+      counts[g.key] = doneResults[i]?.data;
+    });
+    return counts;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- doneResults is a new array each render; doneKey tracks its data
+  }, [openQ.data, open, done, doneKey]);
+}
+
+/** Last time anything was logged on a project, from its few most recently updated tasks. */
+export function useProjectLastLogged(projectId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['tasks', 'last', projectId],
+    queryFn: async () => {
+      const res = await listTasksPage({ project_tasks: projectId, sort: 'updated_at|desc' }, 5);
+      return res.data.reduce((max, t) => Math.max(max, lastLogged(parseTimeLog(t.time_log))), 0);
+    },
+    staleTime: FIVE_MIN,
+    enabled,
+  });
+}

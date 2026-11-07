@@ -32,7 +32,7 @@ class WorkspaceController extends Controller
         if (!$user->hasPermission('view_task')) {
             $taskQuery->where(fn ($q) => $q->where('user_id', $user->id)->orWhere('assigned_user_id', $user->id));
         }
-        $projects = $projectQuery->with('client')->limit(1001)->get(['id', 'name', 'client_id', 'company_id', 'custom_value4', 'due_date']);
+        $projects = $projectQuery->with('client')->limit(1001)->get(['id', 'name', 'client_id', 'company_id', 'custom_value4', 'due_date', 'user_id', 'assigned_user_id']);
         abort_if($projects->count() > 1000, 422, 'This installation needs paginated project discovery.');
         $taskQuery->whereIn('project_id', $projects->pluck('id'));
         $runningBase = clone $taskQuery;
@@ -68,10 +68,12 @@ class WorkspaceController extends Controller
         $limit = (int) ($input['limit'] ?? 200);
         $tasks = $taskQuery->with('assigned_user')->orderByDesc('updated_at')->orderByDesc('id')->limit($limit)->get([
             'id', 'company_id', 'project_id', 'user_id', 'assigned_user_id', 'description', 'status_id', 'due_date', 'updated_at', 'time_log', 'invoice_id']);
-        $visible = $projects->map(function ($p) use ($admin, $evaluation) {
+        $visible = $projects->map(function ($p) use ($admin, $evaluation, $user) {
             $role = $admin ? 'admin' : app(ProjectAccess::class)->role($p->id);
             $pilot = $p->custom_value4 === 'julia-workspace-pilot';
             return ['id' => $p->hashed_id, 'name' => $p->name, 'client' => $p->client?->name ?: '', 'due_date' => $p->due_date,
+                'client_id' => $p->client_id ? $this->encodePrimaryKey($p->client_id) : '', 'active' => true,
+                'own' => (int) ($p->assigned_user_id ?: $p->user_id) === $user->id,
                 'pilot' => $pilot, 'role' => $role ?: 'viewer',
                 'writable' => (!$evaluation || $pilot) && in_array($role, ['admin', 'manager', 'contributor'], true)];
         });

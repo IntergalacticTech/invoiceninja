@@ -1,12 +1,17 @@
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addTaskNote, getProjectPeople, getTaskNotes, type ProjectPerson } from '../api/endpoints';
 import { errorMessage } from '../api/client';
+import { useProjectWritable } from '../auth/session';
 
 export function TaskNotes({ taskId, projectId }: { taskId: string; projectId?: string }) {
   const client = useQueryClient();
+  const writable = useProjectWritable(projectId);
   const query = useQuery({ queryKey: ['task-notes', taskId], queryFn: () => getTaskNotes(taskId), refetchInterval: 30_000 });
   const people = useQuery({ queryKey: ['project-people', projectId], queryFn: () => getProjectPeople(projectId ?? ''), enabled: Boolean(projectId), staleTime: 60_000 });
+  const notes = query.isError ? [] : query.data || [];
   const [body, setBody] = useState('');
   const [caret, setCaret] = useState(0);
   const [selected, setSelected] = useState<ProjectPerson[]>([]);
@@ -20,7 +25,7 @@ export function TaskNotes({ taskId, projectId }: { taskId: string; projectId?: s
   }, [body]);
   const receipt = useRef({ signature: '', id: '' });
   const token = /(?:^|\s)@([^@\n]{0,60})$/.exec(body.slice(0, caret));
-  const suggestions = token && !dismissed ? (people.data ?? []).filter(p => `${p.name} ${p.email}`.toLowerCase().includes((token[1] ?? '').toLowerCase())).slice(0, 8) : [];
+  const suggestions = token && !dismissed ? (people.isError ? [] : people.data ?? []).filter(p => `${p.name} ${p.email}`.toLowerCase().includes((token[1] ?? '').toLowerCase())).slice(0, 8) : [];
   const choose = (person: ProjectPerson) => {
     const before = body.slice(0, caret); const start = before.lastIndexOf('@');
     const insertion = `@${person.name || person.email} `;
@@ -37,10 +42,10 @@ export function TaskNotes({ taskId, projectId }: { taskId: string; projectId?: s
     client.setQueryData<Awaited<ReturnType<typeof getTaskNotes>>>(['task-notes', taskId], old => [...(old ?? []).filter(n => n.id !== note.id), note]);
     setBody(''); setSelected([]); setCaret(0); void client.invalidateQueries({ queryKey: ['task-notes'] });
   } });
-  return <section aria-label="Notes in Ninja"><h2>Notes in Ninja <span className="n">{query.data?.length ?? 0}</span></h2>
+  return <section aria-label="Notes in Ninja"><h2>Notes in Ninja <span className="n">{notes.length}</span></h2>
     {query.isPending && <p role="status">Loading notes…</p>}{query.isError && <p role="alert">Could not load notes. <button type="button" onClick={() => void query.refetch()}>Try again</button></p>}
-    {query.data?.map(note => <article className="task-comment" key={note.id}><header><strong>{note.author}</strong><time className="sub" dateTime={note.created_at}>{new Date(note.created_at).toLocaleString()}</time></header><div className="task-note-text">{note.body}</div></article>)}
-    <form className="task-note-form" onSubmit={e => { e.preventDefault(); if (body.trim() && !save.isPending) save.mutate(); }}>
+    {notes.map(note => <article className="task-comment" key={note.id}><header><strong>{note.author}</strong><time className="sub" dateTime={note.created_at}>{new Date(note.created_at).toLocaleString()}</time></header><div className="task-note-text"><ReactMarkdown remarkPlugins={[remarkGfm]}>{note.body}</ReactMarkdown></div></article>)}
+    {writable ? <form className="task-note-form" onSubmit={e => { e.preventDefault(); if (body.trim() && !save.isPending) save.mutate(); }}>
       <label htmlFor="task-note-body">Add a note</label>
       <textarea ref={textarea} id="task-note-body" rows={4} maxLength={10000} required value={body} disabled={save.isPending} aria-autocomplete="list" aria-controls={suggestions.length ? 'mention-suggestions' : undefined} aria-activedescendant={suggestions[active] ? `mention-${suggestions[active]?.id}` : undefined}
         onChange={e => { setBody(e.target.value); setCaret(e.target.selectionStart); setDismissed(false); setActive(0); }} onSelect={e => setCaret(e.currentTarget.selectionStart)}
@@ -50,6 +55,6 @@ export function TaskNotes({ taskId, projectId }: { taskId: string; projectId?: s
       {people.isError && <p className="sub">Mention suggestions are unavailable. You can still save a note.</p>}
       {save.isError && <p role="alert">Could not save your note. {errorMessage(save.error)} Your draft is still here.</p>}
       <button className="btn" type="submit" disabled={!body.trim() || save.isPending}>{save.isPending ? 'Saving…' : 'Add note'}</button>{save.isSuccess && <p role="status">Note saved in Ninja.</p>}
-    </form>
+    </form> : <p className="sub">This project is read only in this workspace.</p>}
   </section>;
 }

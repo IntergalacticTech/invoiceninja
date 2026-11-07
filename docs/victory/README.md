@@ -150,10 +150,32 @@ do not treat documented setup instructions as proof of a live connection.
 
 ## Integrated Julia workspace
 
-The shared `@victory/workspace` UI lives in `workspace-ui/`. The standalone host
-is `/team/#/workspace`; Julia pins the same package tarball. Repack and update
-both hosts when changing the shared component. The existing team screens and
-upstream admin app remain available.
+The versioned `@victory/workspace` package lives in `workspace-ui/`. Version
+0.2 exports `TeamWorkspace`: the same native project directory, kanban/list,
+task details, Markdown notes, workflow controls and timer used by the standalone
+team application. Julia supplies authentication, a bounded delivery transport,
+clean `/work?project_id=...&task_id=...` links, and an optional nonmodal task pane.
+It does not embed a frame or maintain a second implementation of those views.
+The legacy `Workspace` export and `/workspace` route remain compatible.
+
+`victory-ui/src/` is canonical. After editing a native screen, regenerate and
+repack from the repository root:
+
+```sh
+python3 tools/victory/build_shared_workspace.py
+npm pack ./workspace-ui --pack-destination ./victory-ui/vendor
+cd victory-ui && npm install --force ./vendor/victory-workspace-0.2.0.tgz
+```
+
+Copy that exact archive into the Julia host and refresh its file-dependency lock
+integrity. The generator follows relative imports, substitutes only explicit
+host adapters, scopes canonical CSS under `.victory-team-workspace`, and writes
+SHA256 fingerprints in `workspace-ui/shared-screens.json`. CI runs its `--check`
+mode against both the generated sources and packed bytes. The shared-host tests
+exercise the actual installed archive under React StrictMode, including native
+kanban/deep links, viewer restrictions, nonmodal focus, and safe Markdown.
+Host query caches are isolated by authenticated owner and private content is
+hidden after failed reauthorization.
 
 `VICTORY_PROJECT_ACCESS_ENABLED=true` enables explicit project grants for
 non-admin users. With no grants they see no projects, regardless of broad native
@@ -174,9 +196,22 @@ The additive migration must run before enabling project access.
 `GET /api/v1/victory/workspace` returns the shared UI's allowlisted snapshot.
 `POST /api/v1/victory/tasks/{task}/workspace` supports atomic field edits and
 owned timer start/stop, preserving unrelated time and financial fields. Timer
-commands serialize per person and reject a competing running task. During
-Julia evaluation, writable pilot projects carry `custom_value4` equal to
-`julia-workspace-pilot`. Avaza remains the production source until cutover.
+commands serialize per person and reject a competing running task. The legacy
+`POST /victory/workspace/tasks` command retains its pilot-project evaluation
+guard (`custom_value4=julia-workspace-pilot`). Native views retain the current
+Source actor's project grants and native permissions; Julia's separate mirror
+role does not grant or remove Source administration. Avaza remains the production
+time authority until an explicit cutover; evaluation notices remain visible.
+
+Native `POST /victory/tasks` derives owner and client from the authenticated
+actor and project. `POST /victory/workspace/timer-task` finds or creates an
+actor-owned task from authorized source text/Avaza context, without copying
+another person's time or calendar binding. `POST /victory/tasks/{task}/timer-note`
+annotates exactly one owned interval, preserving timestamps, billable flags,
+other intervals and billing links. These commands require stable request UUIDs
+and use the same durable receipt ledger as atomic task edits/start/stop. New-task
+drafts retain their receipt across uncertain replies. Generic time-log replacement
+and financial operations are not exposed through Julia's delivery bridge.
 
 Restricted legacy task writes accept only delivery/time fields and keep the
 record's time owner, project and client bindings unchanged. Creating or replacing
@@ -193,8 +228,9 @@ responses are unchanged.
 
 With project enforcement enabled, legacy timer starts and active time-log writes
 lock the time owner and use the same competing-timer check as workspace
-commands, including for administrators. The shared Workspace screen uses its
-own timer controls; the legacy tracker remains on the older team screens.
+commands, including for administrators. Both native timer surfaces use atomic
+receipt-bearing start/stop commands and discover running work independently of
+recent-task pagination. The separate Time editor remains available in Source.
 
 Timer operations normalize the single active interval to the end of a task log
 without changing interval values. This avoids the upstream equal-timestamp sort

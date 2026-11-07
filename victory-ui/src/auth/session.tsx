@@ -21,6 +21,9 @@ export interface Session {
   timezone: string;
   /** moment-style format from statics.date_formats, e.g. "MMM D, YYYY" */
   dateFormat: string;
+  writableProjectIds?: string[];
+  allowInvoices?: boolean;
+  taskDetailsModal?: boolean;
 }
 
 const SessionContext = createContext<Session | null>(null);
@@ -139,3 +142,9 @@ export function SessionProvider({ children, fallback }: { children: ReactNode; f
   return <SessionContext.Provider value={q.data}>{children}</SessionContext.Provider>;
 }
 
+
+/** Hosts may narrow editing capabilities; the server always rechecks source authority. */
+export function useProjectWritable(projectId?: string): boolean {
+  const { writableProjectIds } = useSession();
+  return writableProjectIds === undefined || Boolean(projectId && writableProjectIds.includes(projectId));
+}

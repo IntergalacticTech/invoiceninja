@@ -381,4 +381,85 @@ class ProjectAccessTest extends TestCase
         $this->getJson('/api/v1/victory/workspace?view=done')->assertOk()->assertJsonCount(0, 'data.tasks')->assertJsonCount(1, 'data.running_tasks');
         $this->getJson('/api/v1/victory/workspace?search=Bounded%20task%202')->assertOk()->assertJsonPath('data.tasks_total', 1);
     }
+
+    public function test_native_delivery_create_is_idempotent_and_preserves_standalone_permissions(): void
+    {
+        $this->grant();
+        config(['ninja.victory_workspace_evaluation' => true]);
+        $this->project->custom_value4 = ''; $this->project->save();
+        $payload = ['project_id' => $this->project->hashed_id, 'description' => 'Native receipt acceptance', 'request_id' => (string) Str::uuid()];
+        $before = Task::where('company_id', $this->company->id)->count();
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken]);
+        $first = $this->postJson('/api/v1/victory/tasks', $payload)->assertCreated()->json('data.id');
+        $this->postJson('/api/v1/victory/tasks', $payload)->assertCreated()->assertJsonPath('data.id', $first);
+        $this->assertSame($before + 1, Task::where('company_id', $this->company->id)->count());
+        $created = Task::where('company_id', $this->company->id)->where('description', $payload['description'])->sole();
+        $this->assertSame($this->member->id, (int) $created->assigned_user_id);
+        $this->assertSame($this->client->id, (int) $created->client_id);
+        $this->postJson('/api/v1/victory/tasks', array_replace($payload, ['description' => 'Different intent']))->assertStatus(409);
+        $this->postJson('/api/v1/victory/tasks', array_merge($payload, ['assigned_user_id' => $this->user->hashed_id]))->assertStatus(422);
+        // Compatibility endpoints keep their old pilot boundary; the native endpoint follows source authority.
+        $this->postJson('/api/v1/victory/workspace/tasks', array_replace($payload, ['request_id' => (string) Str::uuid()]))->assertStatus(409);
+    }
+
+    public function test_owned_timer_copy_is_source_derived_deduplicated_and_has_no_other_persons_time(): void
+    {
+        $this->grant();
+        $source = Task::factory()->create(['company_id' => $this->company->id, 'project_id' => $this->project->id,
+            'client_id' => $this->client->id, 'user_id' => $this->user->id, 'assigned_user_id' => $this->user->id,
+            'description' => "Source-derived timer work\nSection: Delivery", 'custom_value1' => '9001:123',
+            'time_log' => '[[100,200,"private original time",true]]', 'rate' => 987]);
+        $source->meta = ['calendar_event_id' => 'private-source-calendar', 'avaza' => ['version' => 1, 'task_id' => 9001, 'title' => 'Source-derived timer work', 'comments' => [], 'attachments' => []]];
+        $source->save(); $before = $source->fresh()->getAttributes();
+        $payload = ['project_id' => $this->project->hashed_id, 'task_id' => $source->hashed_id, 'request_id' => (string) Str::uuid()];
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken]);
+        $id = $this->postJson('/api/v1/victory/workspace/timer-task', $payload)->assertOk()->json('data.id');
+        $this->postJson('/api/v1/victory/workspace/timer-task', $payload)->assertOk()->assertJsonPath('data.id', $id);
+        $this->postJson('/api/v1/victory/workspace/timer-task', array_replace($payload, ['request_id' => (string) Str::uuid()]))->assertOk()->assertJsonPath('data.id', $id);
+        $copy = Task::where('company_id', $this->company->id)->where('project_id', $this->project->id)->where('assigned_user_id', $this->member->id)
+            ->where('description', $source->description)->sole();
+        $this->assertSame('[]', $copy->time_log);
+        $this->assertFalse((bool) $copy->is_running);
+        $this->assertEmpty($copy->invoice_id);
+        $this->assertSame(9001, $copy->meta->avaza['task_id']);
+        $this->assertSame('', $copy->meta->calendar_event_id);
+        $this->assertSame('9001:' . $this->member->id, $copy->custom_value1);
+        $this->assertEquals($before, $source->fresh()->getAttributes());
+        $this->postJson('/api/v1/victory/workspace/timer-task', array_merge($payload, ['meta' => ['avaza' => ['task_id' => 999]]]))->assertStatus(422);
+    }
+
+    public function test_atomic_timer_note_preserves_time_billing_ownership_and_other_intervals(): void
+    {
+        $this->grant();
+        $task = Task::factory()->create(['company_id' => $this->company->id, 'project_id' => $this->project->id,
+            'client_id' => $this->client->id, 'user_id' => $this->member->id, 'assigned_user_id' => $this->member->id,
+            'invoice_id' => null, 'time_log' => '[[100,200,"kept",true],[300,400,"old",false]]', 'rate' => 150]);
+        $before = $task->fresh()->getAttributes();
+        $payload = ['started_at' => 300, 'note' => 'Reviewed interval', 'request_id' => (string) Str::uuid()];
+        $path = '/api/v1/victory/tasks/' . $task->hashed_id . '/timer-note';
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->postJson($path, $payload)->assertOk();
+        $this->postJson($path, $payload)->assertOk();
+        $this->assertSame([[100,200,'kept',true],[300,400,'Reviewed interval',false]], json_decode($task->fresh()->time_log, true));
+        foreach (['rate', 'invoice_id', 'duration', 'assigned_user_id', 'user_id', 'project_id'] as $field) {
+            $this->assertEquals($before[$field] ?? null, $task->fresh()->getAttributes()[$field] ?? null, $field);
+        }
+        $this->postJson($path, array_replace($payload, ['request_id' => (string) Str::uuid(), 'started_at' => 999]))->assertStatus(409);
+        $this->postJson($path, array_merge($payload, ['time_log' => '[]']))->assertStatus(422);
+    }
+
+    public function test_native_timer_operations_preserve_project_grants_and_own_time_boundary(): void
+    {
+        $this->grant('viewer');
+        $task = Task::factory()->create(['company_id' => $this->company->id, 'project_id' => $this->project->id,
+            'client_id' => $this->client->id, 'user_id' => $this->user->id, 'assigned_user_id' => $this->user->id,
+            'time_log' => '[[100,200,"private",true]]']);
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->postJson('/api/v1/victory/workspace/timer-task',
+            ['project_id' => $this->project->hashed_id, 'task_id' => $task->hashed_id, 'request_id' => (string) Str::uuid()])->assertForbidden();
+        $this->postJson('/api/v1/victory/tasks/' . $task->hashed_id . '/timer-note',
+            ['started_at' => 100, 'note' => 'forbidden', 'request_id' => (string) Str::uuid()])->assertForbidden();
+        DB::table('victory_project_access')->where('user_id', $this->member->id)->update(['role' => 'contributor']);
+        $this->postJson('/api/v1/victory/tasks/' . $task->hashed_id . '/timer-note',
+            ['started_at' => 100, 'note' => 'forbidden', 'request_id' => (string) Str::uuid()])->assertForbidden();
+        $this->assertSame('[[100,200,"private",true]]', $task->fresh()->time_log);
+    }
 }

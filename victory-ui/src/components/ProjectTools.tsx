@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createProjectInvoice, getAccessMembers, getProjectWorkflow, previewProjectInvoice, setProjectPeople, setProjectWorkflow, type ProjectWorkflow } from '../api/endpoints';
 import { errorMessage } from '../api/client';
-import { useSession } from '../auth/session';
+import { useProjectWritable, useSession } from '../auth/session';
 
 function Membership({ projectId }: { projectId: string }) {
   const query = useQuery({ queryKey: ['access-members'], queryFn: getAccessMembers });
@@ -49,10 +49,11 @@ function InvoiceDraft({ projectId }: { projectId: string }) {
   </section>;
 }
 export function ProjectTools({ projectId }: { projectId: string }) {
-  const { canAdmin } = useSession();
+  const { canAdmin, allowInvoices } = useSession();
+  const writable = useProjectWritable(projectId);
   const [panel, setPanel] = useState('');
   if (!canAdmin) return null;
-  return <><div className="feature-actions">{([['members','Project members'], ['workflow','Configure workflow'], ['invoice','Draft invoice']] as const).map(([key,label]) => <button className="btn ghost" key={key} aria-expanded={panel === key} onClick={() => setPanel(panel === key ? '' : key)}>{label}</button>)}</div>
+  return <><div className="feature-actions">{([['members','Project members'], ['workflow','Configure workflow'], ['invoice','Draft invoice']] as const).filter(([key]) => (key !== 'invoice' || allowInvoices !== false) && (key !== 'workflow' || writable)).map(([key,label]) => <button className="btn ghost" key={key} aria-expanded={panel === key} onClick={() => setPanel(panel === key ? '' : key)}>{label}</button>)}</div>
     {panel === 'members' && <Membership projectId={projectId} />}{panel === 'workflow' && <Workflow projectId={projectId} />}{panel === 'invoice' && <InvoiceDraft projectId={projectId} />}
   </>;
 }

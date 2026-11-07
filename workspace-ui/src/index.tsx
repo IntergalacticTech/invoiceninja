@@ -149,3 +149,5 @@ export function Workspace({ host, initialProjectId = null, initialTaskId = null 
     </>}
   </div>;
 }
+
+export { TeamWorkspace, type TeamHost, type TeamRequestOptions } from "./TeamWorkspace";

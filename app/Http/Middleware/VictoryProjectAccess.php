@@ -134,7 +134,7 @@ class VictoryProjectAccess
         }
         if ($request->isMethod('POST') && $path === 'victory/expenses') return;
         $project = null;
-        if ($request->isMethod('POST') && in_array($path, ['tasks', 'victory/workspace/tasks'], true)) {
+        if ($request->isMethod('POST') && in_array($path, ['tasks', 'victory/tasks', 'victory/workspace/tasks', 'victory/workspace/timer-task'], true)) {
             $project = $this->decodePrimaryKey((string) $request->input('project_id', ''));
             if ($path === 'tasks') {
                 $this->deliveryFields($request);
@@ -156,7 +156,7 @@ class VictoryProjectAccess
                 abort_unless(TaskStatus::where('company_id', $access->companyId)->where('id', $this->decodePrimaryKey((string) $status))->exists(), 422);
             }
             return;
-        } elseif (preg_match('#^(?:victory/)?tasks/([^/]+)(?:/(notes|workspace|workflow))?$#', $path, $m)
+        } elseif (preg_match('#^(?:victory/)?tasks/([^/]+)(?:/(notes|workspace|workflow|timer-note))?$#', $path, $m)
             && in_array($request->method(), ['POST', 'PUT', 'PATCH'], true)) {
             $task = Task::find($this->decodePrimaryKey($m[1]));
             abort_unless($task, 404);

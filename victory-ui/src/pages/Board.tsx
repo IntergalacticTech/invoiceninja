@@ -1,9 +1,9 @@
-import { useMemo, useState, type DragEvent, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { createTask, setTaskWorkflow, sortTasks } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import type { Project, Task } from '../api/types';
-import { useSession } from '../auth/session';
+import { useProjectWritable, useSession } from '../auth/session';
 import { DONE_PAGE_SIZE, SHOW_BUDGET_HOURS } from '../config';
 import { People } from '../components/Avatar';
 import { PlayButton } from '../components/PlayButton';
@@ -82,16 +82,21 @@ function NewTaskForm({ project, groups, sections, onDone }: { project: Project; 
   const qc = useQueryClient();
   const [title, setTitle] = useState('');
   const [section, setSection] = useState('');
+  const receipt = useRef({ signature: '', id: '' });
   const [statusKey, setStatusKey] = useState(groups[0]?.key ?? '');
   const create = useMutation({
-    mutationFn: () =>
-      createTask({
+    mutationFn: () => {
+      const signature = JSON.stringify([project.id, title.trim(), section, statusKey]);
+      if (receipt.current.signature !== signature) receipt.current = { signature, id: crypto.randomUUID() };
+      return createTask({
+        request_id: receipt.current.id,
         project_id: project.id,
         client_id: project.client_id,
         description: title.trim() + (section ? `\nSection: ${section}` : ''),
         assigned_user_id: user.id,
         status_id: groups.find((g) => g.key === statusKey)?.primaryId,
-      }),
+      });
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['tasks', 'project', project.id] });
       void qc.invalidateQueries({ queryKey: ['tasks', 'count', project.id] });
@@ -132,6 +137,7 @@ function NewTaskForm({ project, groups, sections, onDone }: { project: Project; 
       <button type="button" className="btn ghost" onClick={onDone}>
         Cancel
       </button>
+      {create.isError && <p role="alert" className="error">{errorMessage(create.error)} Your draft is kept. Retry this draft to check the same request.</p>}
     </form>
   );
 }
@@ -148,7 +154,7 @@ export function TaskCard({
   dragging,
   onDragStart,
   onDragEnd,
-  projectName, sections, onSection,
+  projectName, sections, onSection, readOnly = false,
 }: {
   item: WorkItem;
   groups: StatusGroup[];
@@ -157,15 +163,16 @@ export function TaskCard({
   dragging: boolean;
   onDragStart: (item: WorkItem, e: DragEvent) => void;
   onDragEnd: () => void;
-  projectName?: string; sections?: string[]; onSection?: (item: WorkItem, section: string) => void;
+  readOnly?: boolean; projectName?: string; sections?: string[]; onSection?: (item: WorkItem, section: string) => void;
 }) {
   const { timezone } = useSession();
   const timer = useTimer();
+  const writable = useProjectWritable(item.projectId) && !readOnly;
   const on = timer.isRunningItem(item);
   return (
     <article
       className={`task${dragging ? ' dragging' : ''}`}
-      draggable
+      draggable={writable}
       data-key={item.key}
       aria-label={item.title}
       onDragStart={(e) => onDragStart(item, e)}
@@ -183,9 +190,9 @@ export function TaskCard({
         <People ids={item.people} nameOf={nameOf} max={4} />
         <span className="num">{fmtH(hoursOf(item.seconds))} h</span>
         <span>· {ago(item.last, timezone)}</span>
-        <StatusMenu title={item.title} groups={groups} current={groupOf(groups, item.statusId)} onSelect={(g) => onMove(item, g)} />
-        {onSection && <SectionSelect item={item} sections={sections ?? []} onChange={onSection} />}
-        <PlayButton title={item.title} on={on} disabled={timer.busy} onClick={() => void timer.toggleItem(item)} />
+        <StatusMenu title={item.title} groups={groups} current={groupOf(groups, item.statusId)} disabled={!writable} onSelect={(g) => onMove(item, g)} />
+        {onSection && writable && <SectionSelect item={item} sections={sections ?? []} onChange={onSection} />}
+        <PlayButton title={item.title} on={on} disabled={timer.busy || (!writable && !on)} onClick={() => void timer.toggleItem(item)} />
       </div>
     </article>
   );
@@ -195,16 +202,18 @@ export function TaskTable({
   columns,
   nameOf,
   groups,
-  onMove, projectNames, sections, onSection,
+  onMove, projectNames, sections, onSection, readOnly = false,
 }: {
   columns: { group: StatusGroup; items: WorkItem[] }[];
-  projectNames?: Map<string, string>; sections?: string[]; onSection?: (item: WorkItem, section: string) => void;
+  readOnly?: boolean; projectNames?: Map<string, string>; sections?: string[]; onSection?: (item: WorkItem, section: string) => void;
   nameOf: (id: string) => string;
   groups: StatusGroup[];
   onMove: (item: WorkItem, target: StatusGroup) => void;
 }) {
   const { timezone } = useSession();
   const timer = useTimer();
+  const { writableProjectIds } = useSession();
+  const writable = (item: WorkItem) => !readOnly && (writableProjectIds === undefined || writableProjectIds.includes(item.projectId));
   const rows = columns.flatMap(({ items }) =>
     [...items].sort((a, b) => b.last - a.last).map((item) => ({ group: groupOf(groups, item.statusId), item })),
   );
@@ -235,11 +244,11 @@ export function TaskTable({
             <td>
               <div className="t-name"><a className="task-open" href={taskHref(item.rep.id)}>{item.title}</a></div>
               {projectNames?.get(item.projectId) && <div className="t-sub">{projectNames.get(item.projectId)}</div>}
-              {onSection ? <SectionSelect item={item} sections={sections ?? []} onChange={onSection} /> : item.section && <div className="t-sub">{item.section}</div>}
+              {onSection && writable(item) ? <SectionSelect item={item} sections={sections ?? []} onChange={onSection} /> : item.section && <div className="t-sub">{item.section}</div>}
             </td>
             <td>
               <span className="pill">
-                <StatusMenu title={item.title} groups={groups} current={group} onSelect={(g) => onMove(item, g)} />
+                <StatusMenu title={item.title} groups={groups} current={group} disabled={!writable(item)} onSelect={(g) => onMove(item, g)} />
                 {group?.label ?? 'Unspecified'}
               </span>
             </td>
@@ -252,7 +261,7 @@ export function TaskTable({
             <td className="r num">{fmtH(hoursOf(item.seconds))}</td>
             <td className="t-sub nowrap">{ago(item.last, timezone)}</td>
             <td className="r play-cell">
-              <PlayButton title={item.title} on={timer.isRunningItem(item)} disabled={timer.busy} onClick={() => void timer.toggleItem(item)} />
+              <PlayButton title={item.title} on={timer.isRunningItem(item)} disabled={timer.busy || (writableProjectIds !== undefined && !writableProjectIds.includes(item.projectId) && !timer.isRunningItem(item))} onClick={() => void timer.toggleItem(item)} />
             </td>
           </tr>
         ))}
@@ -263,6 +272,7 @@ export function TaskTable({
 
 export function ProjectBoard({ project, groups }: { project: Project; groups: StatusGroup[] }) {
   const clients = useClientMap();
+  const writable = useProjectWritable(project.id) && !project.archived_at;
   const { view, setView } = useTaskLayout();
   const { columns: columnMode, setColumns } = useTaskColumns();
   const workflow = useProjectWorkflow(project.id);
@@ -308,7 +318,7 @@ export function ProjectBoard({ project, groups }: { project: Project; groups: St
     const beforeKey = beforeEl?.getAttribute('data-key');
     const others = column.items.filter((i) => i.key !== item.key);
     const index = beforeKey ? others.findIndex((i) => i.key === beforeKey) : -1;
-    const sameSpot = item.statusId && target.statusIds.includes(item.statusId) && (beforeKey === item.key || (!beforeKey && column.items.at(-1)?.key === item.key));
+    const sameSpot = item.statusId && target.statusIds.includes(item.statusId) && (beforeKey === item.key || (!beforeKey && column.items[column.items.length - 1]?.key === item.key));
     if (sameSpot) return;
     moveTo(item, target, index >= 0 ? index : others.length);
   };
@@ -326,12 +336,13 @@ export function ProjectBoard({ project, groups }: { project: Project; groups: St
           </p>
         </div>
         <div className="board-tools">
-          <button type="button" className="btn" onClick={() => setCreating(true)} aria-expanded={creating}>
+          <button type="button" className="btn" disabled={!writable} onClick={() => setCreating(true)} aria-expanded={creating}>
             New task
           </button>
         </div>
       </div>
 
+      {!writable && <p className="sub" role="status">This project is read only here. Your current project access permits browsing.</p>}
       <TaskFilters value={filters} onChange={setFilters} groups={groups} items={allItems} nameOf={nameOf} view={view} onView={setView} columns={columnMode} onColumns={setColumns} />
       {creating && <NewTaskForm project={project} groups={groups} sections={sections} onDone={() => setCreating(false)} />}
 
@@ -368,6 +379,7 @@ export function ProjectBoard({ project, groups }: { project: Project; groups: St
                 {colItems.map((item) => (
                   <TaskCard
                     key={item.key}
+                    readOnly={!writable}
                     item={item}
                     groups={groups}
                     nameOf={nameOf}
@@ -404,7 +416,7 @@ export function ProjectBoard({ project, groups }: { project: Project; groups: St
         </div>
       ) : (
         <div className="table-scroll">
-          <TaskTable columns={columns} sections={sections} onSection={changeSection} nameOf={nameOf} groups={groups} onMove={(it, g) => moveTo(it, g, 0)} />
+          <TaskTable readOnly={!writable} columns={columns} sections={sections} onSection={changeSection} nameOf={nameOf} groups={groups} onMove={(it, g) => moveTo(it, g, 0)} />
           {data.doneLoaded < data.doneTotal && (
             <div className="more">
               <button type="button" disabled={data.isFetchingDone} onClick={() => setDoneLimit((n) => n + DONE_PAGE_SIZE)}>

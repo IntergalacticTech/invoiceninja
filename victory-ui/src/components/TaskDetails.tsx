@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import DOMPurify from 'dompurify';
 import { TaskNotes } from './TaskNotes';
-import { getTask } from '../api/endpoints';
+import { getTask, updateTaskDetails } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { downloadTaskDocument, loadTaskImage, taskDocumentPath } from '../api/documents';
 import type { TaskAttachment } from '../api/types';
 import { parseDescription } from '../domain/workItems';
 import { closeTask } from '../router';
 import { notify } from '../toasts';
+import { useProjectWritable, useSession } from '../auth/session';
+import { useProjects, useProjectWorkflow } from '../hooks/queries';
 
 export function safeTaskUrl(value: string): string | undefined {
   if (!value.trim()) return undefined;
@@ -107,10 +109,30 @@ function Attachments({ files }: { files: TaskAttachment[] }) {
 export function TaskDetails({ taskId }: { taskId: string }) {
   const root = useRef<HTMLDivElement>(null);
   const query = useQuery({ queryKey: ['task', taskId], queryFn: () => getTask(taskId) });
-  const task = query.data;
+  const task = query.isError ? undefined : query.data;
+  const session = useSession();
+  const projects = useProjects(session.canAdmin);
+  const project = projects.data?.find(item => item.id === task?.project_id);
+  const writable = useProjectWritable(task?.project_id) && Boolean(project && !project.archived_at);
+  const [narrow, setNarrow] = useState(() => typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 760px)').matches);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia('(max-width: 760px)');
+    const update = () => setNarrow(query.matches);
+    query.addEventListener('change', update); update();
+    return () => query.removeEventListener('change', update);
+  }, []);
+  const modal = session.taskDetailsModal !== false || narrow;
+  const workflow = useProjectWorkflow(task?.project_id);
+  const cache = useQueryClient();
+  const [draft, setDraft] = useState<{ description: string; status_id: string; due_date: string; expected_updated_at: number; request_id: string } | null>(null);
+  const save = useMutation({ mutationFn: async () => {
+    if (!draft) return;
+    await updateTaskDetails(taskId, { description: draft.description, ...(draft.status_id ? { status_id: draft.status_id } : {}), due_date: draft.due_date || null, expected_updated_at: draft.expected_updated_at }, draft.request_id);
+  }, onSuccess: async () => { setDraft(null); await cache.invalidateQueries({ queryKey: ['task', taskId] }); await cache.invalidateQueries({ queryKey: ['tasks'] }); } });
   const content = task?.meta?.avaza;
   const parsed = parseDescription(task?.description ?? '');
-  const title = content?.title || (task ? parsed.title : 'Task details');
+  const title = task ? parsed.title : content?.title || 'Task details';
   const source = content?.source_url ? safeTaskUrl(content.source_url) : undefined;
   const remaining = (task?.description ?? '').split(/\r?\n/).slice(1);
   if (/^section:/i.test(remaining[0] ?? '')) remaining.shift();
@@ -120,11 +142,11 @@ export function TaskDetails({ taskId }: { taskId: string }) {
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const overflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    if (modal) document.body.style.overflow = 'hidden';
     root.current?.focus();
     const keydown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); closeTask(); }
-      if (e.key !== 'Tab') return;
+      if (e.key === 'Escape' && (modal || root.current?.contains(document.activeElement))) { e.preventDefault(); closeTask(); }
+      if (!modal || e.key !== 'Tab') return;
       const targets = root.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), textarea:not([disabled]), [tabindex="0"]');
       const first = targets?.[0];
       const last = targets?.[targets.length - 1];
@@ -133,15 +155,16 @@ export function TaskDetails({ taskId }: { taskId: string }) {
       else if (!e.shiftKey && (document.activeElement === last || document.activeElement === root.current)) { e.preventDefault(); first.focus(); }
     };
     document.addEventListener('keydown', keydown);
-    return () => { document.removeEventListener('keydown', keydown); document.body.style.overflow = overflow; previous?.focus(); };
-  }, [taskId]);
+    return () => { document.removeEventListener('keydown', keydown); if (modal) document.body.style.overflow = overflow; if (previous && document.contains(previous)) previous.focus(); };
+  }, [taskId, modal]);
 
-  return <div className="task-backdrop" onClick={(e) => { if (e.target === e.currentTarget) closeTask(); }}>
-    <div className="task-details" role="dialog" aria-modal="true" aria-labelledby="task-detail-title" tabIndex={-1} ref={root}>
+  return <div className={`task-backdrop${modal ? '' : ' task-nonmodal'}`} onClick={(e) => { if (e.target === e.currentTarget) closeTask(); }}>
+    <div className="task-details" role={modal ? 'dialog' : 'region'} aria-modal={modal || undefined} aria-labelledby="task-detail-title" tabIndex={-1} ref={root}>
       <header className="task-detail-head">
         <div><p className="sub">Task details{content?.section || parsed.section ? ` · ${content?.section || parsed.section}` : ''}</p><h1 id="task-detail-title">{title}</h1></div>
         <div className="task-detail-actions">
-          {task && <button type="button" className="btn ghost" onClick={() => document.getElementById('task-note-body')?.focus()}>Write a note</button>}
+          {task && writable && <button type="button" className="btn ghost" onClick={() => document.getElementById('task-note-body')?.focus()}>Write a note</button>}
+          {task && writable && <button type="button" className="btn ghost" onClick={() => { save.reset(); setDraft({ description: task.description, status_id: task.status_id, due_date: task.due_date || '', expected_updated_at: task.updated_at, request_id: crypto.randomUUID() }); }}>Edit task</button>}
           <button type="button" className="btn ghost" onClick={closeTask} aria-label="Close task details">Close ×</button>
         </div>
       </header>
@@ -161,8 +184,13 @@ export function TaskDetails({ taskId }: { taskId: string }) {
           {content.subtask_count ? <div><dt>Subtasks</dt><dd>{content.subtask_count}</dd></div> : null}
           {content.tags?.length ? <div><dt>Tags</dt><dd>{content.tags.join(', ')}</dd></div> : null}
         </dl>}
+        {draft && <form className="feature-panel" aria-label="Edit task" onSubmit={event => { event.preventDefault(); if (draft.description.trim()) save.mutate(); }}>
+          <h2>Edit task</h2><label>Description<textarea aria-label="Task description" rows={6} maxLength={10000} required value={draft.description} onChange={event => setDraft({ ...draft, description: event.target.value, request_id: crypto.randomUUID() })} /></label>
+          <div className="form-grid"><label>Status<select aria-label="Task status" value={draft.status_id} onChange={event => setDraft({ ...draft, status_id: event.target.value, request_id: crypto.randomUUID() })}>{!draft.status_id && <option value="">No status</option>}{workflow.data?.statuses.map(status => <option key={status.id} value={status.id}>{status.name}</option>)}</select></label><label>Due date<input type="date" aria-label="Task due date" value={draft.due_date} onChange={event => setDraft({ ...draft, due_date: event.target.value, request_id: crypto.randomUUID() })} /></label></div>
+          {save.isError && <p role="alert">{errorMessage(save.error)} Your draft has been kept.</p>}<div className="feature-actions"><button className="btn" disabled={save.isPending || !draft.description.trim()} type="submit">{save.isPending ? 'Saving…' : 'Save task'}</button><button className="btn ghost" disabled={save.isPending} type="button" onClick={() => setDraft(null)}>Cancel edit</button></div>
+        </form>}
         <section aria-label="Task description"><h2>Description</h2>
-          {content?.description_html ? <RichTaskText html={content.description_html} /> : body ? <div className="task-rich">{body}</div> : <p className="sub">No additional description.</p>}
+          {body ? <div className="task-rich">{body}</div> : content?.description_html ? <RichTaskText html={content.description_html} /> : <p className="sub">No additional description.</p>}
         </section>
         <section aria-label="Task attachments"><h2>Attachments</h2>
           <Attachments files={files} />

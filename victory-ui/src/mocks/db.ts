@@ -26,6 +26,8 @@ export type Db = ReturnType<typeof buildFixtures> & {
   clock: number;
   taskNotes: Record<string, TaskNote[]>;
   savedReports: SavedReport[];
+  /** Test-only uncertain reply after an atomic command has committed. */
+  failNextCommandReply?: boolean;
 };
 
 export const nowUnix = () => Math.floor(Date.now() / 1000);

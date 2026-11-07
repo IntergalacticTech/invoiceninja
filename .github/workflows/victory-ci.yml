@@ -54,6 +54,8 @@ jobs:
           cache: npm
           cache-dependency-path: victory-ui/package-lock.json
       - run: npm ci
+      - name: Verify shared project screen package matches the standalone source
+        run: python3 ../tools/victory/build_shared_workspace.py --check
       - run: npm run lint
       - run: npm test -- --run
       - run: npm run build

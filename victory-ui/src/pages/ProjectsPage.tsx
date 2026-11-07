@@ -17,7 +17,7 @@ import {
   useProjects,
   useStatusGroups,
 } from '../hooks/queries';
-import { navigate, projectHref } from '../router';
+import { href, navigate, projectHref, useRoute } from '../router';
 
 interface Stats {
   seconds: number;
@@ -209,7 +209,9 @@ function QuietRow({ row, onSelect }: { row: Row; onSelect: (id: string) => void 
 export function ProjectsPage() {
   const session = useSession();
   const { canAdmin, user } = session;
-  const projectsQ = useProjects();
+  const route = useRoute();
+  const inactive = canAdmin && route.query.get('inactive') === '1';
+  const projectsQ = useProjects(inactive);
   const clients = useClientMap();
   const entriesQ = useLast30Days();
   const myTasks = useMyRecentTasks();
@@ -217,7 +219,7 @@ export function ProjectsPage() {
   const groups = useMemo(() => summaryGroups(statuses), [statuses]);
   const nameOf = usePeople();
 
-  const [mine, setMine] = useState(false);
+  const [mine, setMine] = useState(true);
   const [layout, setLayoutState] = useState<'cards' | 'list'>(readLayout);
   const setLayout = (v: 'cards' | 'list') => {
     setLayoutState(v);
@@ -249,11 +251,12 @@ export function ProjectsPage() {
       }))
       .filter(
         (r) =>
-          (!mine || myProjectIds.has(r.project.id) || r.project.assigned_user_id === user.id) &&
+          (inactive ? Boolean(r.project.archived_at) : !r.project.archived_at) &&
+          (!canAdmin || !mine || myProjectIds.has(r.project.id) || (r.project.assigned_user_id || r.project.user_id) === user.id) &&
           (!needle || r.project.name.toLowerCase().includes(needle) || r.client.toLowerCase().includes(needle)),
       )
       .sort((a, b) => b.stats.last - a.stats.last || b.project.updated_at - a.project.updated_at);
-  }, [projectsQ.data, clients, stats, mine, myProjectIds, q, user.id]);
+  }, [projectsQ.data, clients, stats, mine, myProjectIds, q, user.id, canAdmin, inactive]);
 
   const recent = rows.filter((r) => r.stats.seconds > 0);
   const quiet = rows.filter((r) => !(r.stats.seconds > 0));
@@ -262,8 +265,8 @@ export function ProjectsPage() {
   const onSelect = (id: string) => { const project = projectsQ.data?.find(p => p.id === id); if (project) navigate(projectHref(project)); };
 
   const summary = canAdmin
-    ? `${rows.length} active projects · ${recent.length} worked on in the last 30 days · ${fmtH(hours)} hours logged`
-    : `${rows.length} active projects · you worked on ${recent.length} in the last 30 days · ${fmtH(hours)} of your hours`;
+    ? `${rows.length} ${inactive ? 'inactive' : 'active'} projects · ${recent.length} worked on in the last 30 days · ${fmtH(hours)} hours logged`
+    : `${rows.length} ${inactive ? 'inactive' : 'active'} projects · you worked on ${recent.length} in the last 30 days · ${fmtH(hours)} of your hours`;
 
   const shownQuiet = showAllQuiet ? quiet : quiet.slice(0, QUIET_SHOWN);
 
@@ -271,11 +274,12 @@ export function ProjectsPage() {
     <>
       <section className="head" aria-label="Projects header">
         <div>
-          <h1>Active projects</h1>
+          <h1>{inactive ? 'Inactive projects' : 'Active projects'}</h1>
+          {canAdmin && <a className="plain" href={href(inactive ? '/projects' : '/projects?inactive=1')}>{inactive ? 'Back to active projects' : 'View inactive projects'}</a>}
           <p className="sub">{projectsQ.isPending ? 'Loading projects…' : summary}</p>
         </div>
         <div className="controls">
-          <Seg
+          {canAdmin && !inactive && <Seg
             label="Whose projects"
             value={mine ? 'mine' : 'all'}
             onChange={(v) => setMine(v === 'mine')}
@@ -283,7 +287,7 @@ export function ProjectsPage() {
               { value: 'mine', label: 'Mine' },
               { value: 'all', label: 'All' },
             ]}
-          />
+          />}
           <Seg
             label="Project layout"
             value={layout}
