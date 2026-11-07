@@ -42,6 +42,37 @@ describe('evaluation workflows', () => {
     expect(card).toHaveTextContent(getDb().projects.find(p => p.id === 'p_asl')?.name ?? 'ASL');
   });
 
+  it('selects an @mention and sends the chosen person with the note', async () => {
+    const { user } = renderApp({ hash: '#/projects/p_asl?task=t_2' });
+    const dialog = await screen.findByRole('dialog');
+    await user.click(await within(dialog).findByRole('button', { name: 'Write a note' }));
+    await user.type(within(dialog).getByRole('textbox', { name: 'Add a note' }), '@John');
+    const suggestions = await screen.findByRole('listbox', { name: 'Mention a project member' });
+    await user.click(within(suggestions).getByRole('button', { name: /John Cunningham/ }));
+    await user.type(within(dialog).getByRole('textbox', { name: 'Add a note' }), 'please review this');
+    await user.click(within(dialog).getByRole('button', { name: 'Add note' }));
+    await screen.findByText('Note saved in Ninja.');
+    expect(writes().find(r => r.path.endsWith('/notes'))?.body).toMatchObject({ body: '@John Cunningham please review this', mentions: ['u_john'] });
+  });
+
+  it('submits an expense inside the team app and preserves its amount', async () => {
+    const rows: { id: string; amount: string; notes: string; project_id: string; date: string }[] = [];
+    server.use(
+      http.get('*/api/v1/victory/expenses', () => HttpResponse.json({ data: rows, categories: [], currency_id: '1', currency_code: 'USD', meta: { pagination: { total_pages: 1 } } })),
+      http.post('*/api/v1/victory/expenses', async ({ request }) => { const input = await request.json() as typeof rows[number]; rows.push({ ...input, id: 'expense-1' }); return HttpResponse.json({ data: rows[0] }, { status: 201 }); }),
+    );
+    const { user } = renderApp({ hash: '#/expenses' });
+    const form = await screen.findByRole('form', { name: 'New expense' });
+    await within(form).findByRole('option', { name: /App Update for Ticket Writer/ });
+    await user.selectOptions(within(form).getByLabelText('Project'), 'p_asl');
+    await user.type(within(form).getByLabelText('Amount'), '19.50');
+    await user.type(within(form).getByLabelText('Description'), 'Project transport');
+    await user.click(within(form).getByRole('button', { name: 'Submit expense' }));
+    await screen.findByText('Expense submitted.');
+    expect(await screen.findByRole('cell', { name: '19.50' })).toBeInTheDocument();
+    expect(writes().find(r => r.path === '/victory/expenses')?.body).toMatchObject({ amount: '19.5', notes: 'Project transport', project_id: 'p_asl' });
+  });
+
   it('requires an invoice preview before explicit draft creation', async () => {
     server.use(
       http.post('*/api/v1/victory/invoices/projects/p_asl/preview', () => HttpResponse.json({ data: { preview_id: 'snapshot', project: 'ASL', client: 'Client', currency: 'USD', amount: '100', taxes: '0', lines: [{ description: 'Stopped billable time', quantity: 1, rate: 100, total: 100, kind: 'time' }] } })),

@@ -89,7 +89,7 @@ class EvaluationFeedbackTest extends TestCase
         $this->project->custom_value1 = '12345'; $this->project->save();
         $task = $this->task(); $task->custom_value1 = '500:1'; $task->save();
         $status = TaskStatus::factory()->create(['company_id' => $this->company->id, 'user_id' => $this->user->id]);
-        $before = $task->getAttributes();
+        $before = $task->fresh()->getAttributes();
         $path = '/api/v1/victory/projects/' . $this->project->hashed_id . '/source-statuses';
         $body = ['source_project_id' => 12345, 'tasks' => [['source_task_id' => 500, 'status_id' => $status->hashed_id]]];
         $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->postJson($path, $body)->assertForbidden();

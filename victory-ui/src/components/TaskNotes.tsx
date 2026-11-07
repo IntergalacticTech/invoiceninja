@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addTaskNote, getProjectPeople, getTaskNotes, type ProjectPerson } from '../api/endpoints';
 import { errorMessage } from '../api/client';
@@ -13,6 +13,11 @@ export function TaskNotes({ taskId, projectId }: { taskId: string; projectId?: s
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const selection = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (selection.current === null) return;
+    textarea.current?.focus(); textarea.current?.setSelectionRange(selection.current, selection.current); selection.current = null;
+  }, [body]);
   const receipt = useRef({ signature: '', id: '' });
   const token = /(?:^|\s)@([^@\n]{0,60})$/.exec(body.slice(0, caret));
   const suggestions = token && !dismissed ? (people.data ?? []).filter(p => `${p.name} ${p.email}`.toLowerCase().includes((token[1] ?? '').toLowerCase())).slice(0, 8) : [];
@@ -21,7 +26,7 @@ export function TaskNotes({ taskId, projectId }: { taskId: string; projectId?: s
     const insertion = `@${person.name || person.email} `;
     setBody(body.slice(0, start) + insertion + body.slice(caret));
     setSelected(rows => [...rows.filter(p => p.id !== person.id), person]); setDismissed(true);
-    requestAnimationFrame(() => { textarea.current?.focus(); textarea.current?.setSelectionRange(start + insertion.length, start + insertion.length); setCaret(start + insertion.length); });
+    selection.current = start + insertion.length; setCaret(selection.current);
   };
   const save = useMutation({ mutationFn: async () => {
     const mentions = selected.filter(p => body.includes(`@${p.name || p.email}`)).map(p => p.id);

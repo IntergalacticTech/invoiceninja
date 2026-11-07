@@ -336,3 +336,12 @@ img.av { object-fit: cover; flex-shrink: 0; }
 .mention-suggestions button { display:flex; justify-content:space-between; width:100%; gap:1rem; padding:.5rem; text-align:left; border:0; background:transparent; color:var(--ink); }
 .mention-suggestions [aria-selected=true] button, .mention-suggestions button:hover { background:var(--accent-soft); }
 .mention-suggestions small { color:var(--muted); }
+
+/* Keep long pickers and data grids inside the page at every viewport width. */
+main .wrap { grid-template-columns: minmax(0, 1fr); }
+main .wrap > *, .form-grid > * { min-width: 0; }
+.feature-panel label > input:not([type=checkbox]):not([type=color]), .feature-panel label > select, .feature-panel label > textarea, .feature-actions > input, .task-filters select, .newtask select {
+  width: 100%; max-width: 100%; min-width: 0; border: 1px solid var(--rule); border-radius: 8px; padding: 7px 10px; background: var(--surface); color: var(--ink); font: inherit;
+}
+.task-filters select, .newtask select { width: auto; }
+select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
