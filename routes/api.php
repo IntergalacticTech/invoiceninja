@@ -436,7 +436,7 @@ Route::group(['middleware' => ['throttle:api', 'token_auth', \App\Http\Middlewar
     Route::get('victory/tasks', [\App\Http\Controllers\Victory\TeamTaskController::class, 'index']);
     Route::get('victory/projects/{project}/people', [\App\Http\Controllers\Victory\ProjectPeopleController::class, 'index']);
     Route::put('victory/projects/{project}/people', [\App\Http\Controllers\Victory\ProjectPeopleController::class, 'update']);
-    Route::get('victory/projects/{project}/workflow', [\App\Http\Controllers\Victory\ProjectWorkflowController::class, 'index'])->withTrashed();
+    Route::get('victory/projects/{project}/workflow', [\App\Http\Controllers\Victory\ProjectWorkflowController::class, 'index']);
     Route::put('victory/projects/{project}/workflow', [\App\Http\Controllers\Victory\ProjectWorkflowController::class, 'update']);
     Route::post('victory/projects/{project}/source-statuses', [\App\Http\Controllers\Victory\ProjectWorkflowController::class, 'sourceStatuses']);
     Route::post('victory/tasks/{task}/workflow', [\App\Http\Controllers\Victory\ProjectWorkflowController::class, 'task']);

@@ -462,4 +462,15 @@ class ProjectAccessTest extends TestCase
             ['started_at' => 100, 'note' => 'forbidden', 'request_id' => (string) Str::uuid()])->assertForbidden();
         $this->assertSame('[[100,200,"private",true]]', $task->fresh()->time_log);
     }
+
+    public function test_archived_workflow_uses_native_hash_binding_and_remains_admin_only(): void
+    {
+        $this->grant();
+        $path = '/api/v1/victory/projects/' . $this->project->hashed_id . '/workflow';
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->getJson($path)->assertOk();
+        $this->project->delete();
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->getJson($path)->assertOk();
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->getJson($path)->assertNotFound();
+    }
+
 }
