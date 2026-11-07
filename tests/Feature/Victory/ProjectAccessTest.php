@@ -397,7 +397,9 @@ class ProjectAccessTest extends TestCase
         $this->assertSame($this->member->id, (int) $created->assigned_user_id);
         $this->assertSame($this->client->id, (int) $created->client_id);
         $this->postJson('/api/v1/victory/tasks', array_replace($payload, ['description' => 'Different intent']))->assertStatus(409);
-        $this->postJson('/api/v1/victory/tasks', array_merge($payload, ['assigned_user_id' => $this->user->hashed_id]))->assertStatus(422);
+        $this->postJson('/api/v1/victory/tasks', array_merge($payload, ['assigned_user_id' => $this->user->hashed_id]))->assertForbidden();
+        $this->assertSame($before + 1, Task::where('company_id', $this->company->id)->count());
+        $this->assertSame($this->member->id, (int) $created->fresh()->assigned_user_id);
         // Compatibility endpoints keep their old pilot boundary; the native endpoint follows source authority.
         $this->postJson('/api/v1/victory/workspace/tasks', array_replace($payload, ['request_id' => (string) Str::uuid()]))->assertStatus(409);
     }
