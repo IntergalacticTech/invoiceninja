@@ -39,6 +39,8 @@ function mockNavigations(): Plugin {
           res.end();
           return;
         }
+        // Match production's clean links when a local page is refreshed.
+        if (/^\/(projects|project|tasks|time|reports|expenses|workspace|dashboard)(?:[/?]|$)/.test(url)) req.url = `/team${url}`;
         next();
       });
     },
