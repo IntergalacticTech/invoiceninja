@@ -143,7 +143,7 @@ function NewTaskForm({ project, groups, sections, onDone }: { project: Project; 
 }
 
 function SectionSelect({ item, sections, onChange }: { item: WorkItem; sections: string[]; onChange(item: WorkItem, section: string): void }) {
-  return <select aria-label={`Section of ${item.title}`} value={item.section} onChange={e => onChange(item, e.target.value)}><option value="">No section</option>{[...new Set([...sections, item.section].filter(Boolean))].map(section => <option key={section} value={section}>{section}</option>)}</select>;
+  return <select className="task-section" aria-label={`Section of ${item.title}`} value={item.section} onChange={e => onChange(item, e.target.value)}><option value="">No section</option>{[...new Set([...sections, item.section].filter(Boolean))].map(section => <option key={section} value={section}>{section}</option>)}</select>;
 }
 
 export function TaskCard({
@@ -190,8 +190,10 @@ export function TaskCard({
         <People ids={item.people} nameOf={nameOf} max={4} />
         <span className="num">{fmtH(hoursOf(item.seconds))} h</span>
         <span>· {ago(item.last, timezone)}</span>
-        <StatusMenu title={item.title} groups={groups} current={groupOf(groups, item.statusId)} disabled={!writable} onSelect={(g) => onMove(item, g)} />
+      </div>
+      <div className="task-actions">
         {onSection && writable && <SectionSelect item={item} sections={sections ?? []} onChange={onSection} />}
+        <StatusMenu title={item.title} groups={groups} current={groupOf(groups, item.statusId)} disabled={!writable} onSelect={(g) => onMove(item, g)} />
         <PlayButton title={item.title} on={on} disabled={timer.busy || (!writable && !on)} onClick={() => void timer.toggleItem(item)} />
       </div>
     </article>
