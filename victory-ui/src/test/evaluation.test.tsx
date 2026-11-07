@@ -15,6 +15,14 @@ describe('evaluation workflows', () => {
     expect(window.location.hash).toBe('');
   });
 
+  it('counts completion using each project workflow instead of company-wide status names', async () => {
+    getDb().tasks.filter(t => t.project_id === 'p_asl').forEach(t => { t.status_id = 'st_progress'; });
+    server.use(http.get('*/api/v1/victory/projects/p_asl/workflow', () => HttpResponse.json({ data: { statuses: getDb().statuses.map(s => ({ ...s, is_done: s.id === 'st_progress' || s.name === 'Done' })), sections: [], configured: true } })));
+    renderApp();
+    const card = await screen.findByRole('button', { name: /App Update for Ticket Writer/ });
+    await waitFor(() => expect(card).toHaveTextContent(/0\s+open/));
+  });
+
   it('uses section columns without changing status labels and includes a section in new tasks', async () => {
     server.use(http.get('*/api/v1/victory/projects/p_asl/workflow', () => HttpResponse.json({ data: { statuses: getDb().statuses, sections: ['Design', 'Delivery'], configured: true } })));
     const { user } = renderApp({ hash: '#/projects/p_asl' });

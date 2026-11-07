@@ -55,6 +55,15 @@ export function statsByProject(entries: TimeEntry[]): Map<string, Stats> {
   return map;
 }
 
+function summaryGroups(groups: StatusGroup[]): StatusGroup[] {
+  return [openGroups(groups), doneGroups(groups)].flatMap((choices, i) => choices[0] ? [{ ...choices[0], key: i ? 'done' : 'open', label: i ? 'Done' : 'Open', statusIds: choices.flatMap(g => g.statusIds), isDone: Boolean(i) }] : []);
+}
+function useSummaryCounts(projectId: string) {
+  const { groups } = useStatusGroups(projectId);
+  const summary = useMemo(() => summaryGroups(groups), [groups]);
+  return useProjectCounts(projectId, summary);
+}
+
 function Distribution({ counts, groups, mini }: { counts: Record<string, number | undefined>; groups: StatusGroup[]; mini?: boolean }) {
   const total = groups.reduce((sum, g) => sum + (counts[g.key] ?? 0), 0) || 1;
   return (
@@ -91,7 +100,7 @@ function ProjectCard({
   onSelect: (id: string) => void;
 }) {
   const { timezone, canAdmin } = useSession();
-  const counts = useProjectCounts(row.project.id, groups);
+  const counts = useSummaryCounts(row.project.id);
   return (
     <button type="button" className="card" aria-pressed={selected} onClick={() => onSelect(row.project.id)}>
       <div>
@@ -134,7 +143,7 @@ function ProjectTableRow({
   onSelect: (id: string) => void;
 }) {
   const { timezone } = useSession();
-  const counts = useProjectCounts(row.project.id, groups);
+  const counts = useSummaryCounts(row.project.id);
   const quiet = row.stats.seconds <= 0;
   const last = useProjectLastLogged(row.project.id, quiet);
   const lastTime = quiet ? last.data ?? 0 : row.stats.last;
@@ -176,12 +185,9 @@ function ProjectTableRow({
   );
 }
 
-function QuietRow({ row, groups, onSelect }: { row: Row; groups: StatusGroup[]; onSelect: (id: string) => void }) {
+function QuietRow({ row, onSelect }: { row: Row; onSelect: (id: string) => void }) {
   const { timezone } = useSession();
-  const open = openGroups(groups);
-  const first = open[0];
-  const openKey: StatusGroup[] = first ? [{ ...first, key: 'open', statusIds: open.flatMap((g) => g.statusIds) }] : [];
-  const counts = useProjectCounts(row.project.id, openKey);
+  const counts = useSummaryCounts(row.project.id);
   const last = useProjectLastLogged(row.project.id);
   return (
     <li>
@@ -208,7 +214,7 @@ export function ProjectsPage() {
   const entriesQ = useLast30Days();
   const myTasks = useMyRecentTasks();
   const { groups: statuses } = useStatusGroups();
-  const groups = useMemo(() => [openGroups(statuses), doneGroups(statuses)].flatMap((choices, i) => choices[0] ? [{ ...choices[0], key: i ? 'done' : 'open', label: i ? 'Done' : 'Open', statusIds: choices.flatMap(g => g.statusIds), isDone: Boolean(i) }] : []), [statuses]);
+  const groups = useMemo(() => summaryGroups(statuses), [statuses]);
   const nameOf = usePeople();
 
   const [mine, setMine] = useState(false);
@@ -376,7 +382,7 @@ export function ProjectsPage() {
           <div className="quiet">
             <ul>
               {shownQuiet.map((row) => (
-                <QuietRow key={row.project.id} row={row} groups={groups} onSelect={onSelect} />
+                <QuietRow key={row.project.id} row={row} onSelect={onSelect} />
               ))}
             </ul>
             {quiet.length > QUIET_SHOWN && (

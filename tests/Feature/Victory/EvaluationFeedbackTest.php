@@ -206,6 +206,23 @@ class EvaluationFeedbackTest extends TestCase
         $this->assertEquals($this->decodePrimaryKey($statuses[0]['id']), $task->fresh()->status_id);
     }
 
+    public function test_project_workflows_reuse_named_statuses_without_changing_another_project(): void
+    {
+        $old = TaskStatus::factory()->create(['company_id' => $this->company->id, 'user_id' => $this->user->id, 'name' => 'Old column']);
+        $shared = TaskStatus::factory()->create(['company_id' => $this->company->id, 'user_id' => $this->user->id, 'name' => 'QA review']);
+        $task = $this->task(); $task->status_id = $old->id; $task->save();
+        $other = Project::factory()->create(['company_id' => $this->company->id, 'user_id' => $this->user->id, 'client_id' => $this->client->id]);
+        $count = TaskStatus::where('company_id', $this->company->id)->count();
+        $body = ['statuses' => [['id' => $old->hashed_id, 'name' => 'QA review', 'color' => '#123456', 'is_done' => true]], 'sections' => []];
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->putJson('/api/v1/victory/projects/' . $this->project->hashed_id . '/workflow', $body)->assertOk()->assertJsonPath('data.statuses.0.id', $shared->hashed_id);
+        $this->assertEquals($shared->id, $task->fresh()->status_id);
+        unset($body['statuses'][0]['id']); $body['statuses'][0]['is_done'] = false;
+        $this->putJson('/api/v1/victory/projects/' . $other->hashed_id . '/workflow', $body)->assertOk()->assertJsonPath('data.statuses.0.id', $shared->hashed_id);
+        $this->assertSame($count, TaskStatus::where('company_id', $this->company->id)->count());
+        $this->getJson('/api/v1/victory/projects/' . $this->project->hashed_id . '/workflow')->assertOk()->assertJsonPath('data.statuses.0.is_done', true);
+        $this->getJson('/api/v1/victory/projects/' . $other->hashed_id . '/workflow')->assertOk()->assertJsonPath('data.statuses.0.is_done', false);
+    }
+
     public function test_mention_recipients_require_current_project_access_and_delivery_is_deduplicated(): void
     {
         $this->grant(); [$recipient] = $this->person('Jane Reviewer'); $this->grant($recipient, 'viewer'); $task = $this->task();

@@ -55,10 +55,15 @@ class ProjectWorkflowController extends Controller
                 $status = !empty($input['id']) ? TaskStatus::where('company_id', $user->companyId())->findOrFail($this->decodePrimaryKey($input['id'])) : null;
                 $oldId = $status?->id;
                 if (!$status || $status->name !== trim($input['name'])) {
-                    $status = new TaskStatus();
-                    $status->company_id = $user->companyId(); $status->user_id = $user->id;
-                    $status->fill(['name' => trim($input['name']), 'color' => $input['color'], 'status_order' => $order]);
-                    $status->save();
+                    // Reuse an exact named status across projects; color, order and completion remain project-local.
+                    $name = trim($input['name']);
+                    $status = TaskStatus::where('company_id', $user->companyId())->where('name', $name)->get()->first(fn ($candidate) => $candidate->name === $name);
+                    if (!$status) {
+                        $status = new TaskStatus();
+                        $status->company_id = $user->companyId(); $status->user_id = $user->id;
+                        $status->fill(['name' => $name, 'color' => $input['color'], 'status_order' => $order]);
+                        $status->save();
+                    }
                     if ($oldId) Task::where('project_id', $project->id)->where('status_id', $oldId)->update(['status_id' => $status->id]);
                 }
                 $retained[] = $status->id;
