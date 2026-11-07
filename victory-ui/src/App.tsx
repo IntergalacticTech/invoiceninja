@@ -8,7 +8,7 @@ import { Header } from './components/Header';
 import { Toasts } from './components/Toasts';
 import { Tracker } from './components/Tracker';
 import { TaskDetails } from './components/TaskDetails';
-import { EVALUATION_MODE } from './config';
+import { EVALUATION_MODE, REMOTE_DEVELOPMENT } from './config';
 import { TimerProvider } from './hooks/timer';
 import { WorkspacePage } from './pages/WorkspacePage';
 import { MyTasksPage } from './pages/MyTasksPage';
@@ -79,6 +79,7 @@ export function App({ queryClient, initialNotice }: { queryClient: QueryClient; 
 
   return (
     <QueryClientProvider client={queryClient}>
+      {REMOTE_DEVELOPMENT && <aside className="evaluation-note" aria-label="Local development connection"><div className="wrap"><strong>Local UI · Remote evaluation data.</strong> Edits save to the shared test system. Hot reload is on.</div></aside>}
       {EVALUATION_MODE && (
         <aside className="evaluation-note" aria-label="Evaluation notice">
           <div className="wrap">
@@ -96,7 +97,7 @@ export function App({ queryClient, initialNotice }: { queryClient: QueryClient; 
         </SessionProvider>
       ) : (
         <>
-          <SignIn notice={notice} />
+          <SignIn notice={notice} onConnected={() => { queryClient.clear(); setNotice(undefined); setTokenState(getToken()); }} />
           <Toasts />
         </>
       )}

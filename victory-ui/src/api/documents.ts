@@ -1,11 +1,12 @@
 import { api } from './client';
-import { API_BASE } from '../config';
+import { API_BASE, REMOTE_API_ORIGIN, REMOTE_DEVELOPMENT } from '../config';
 
 /** Never send the session token to a source attachment provider or another host. */
 export function taskDocumentPath(value: string): string | undefined {
   try {
     const url = new URL(value, window.location.origin);
-    if (url.origin !== window.location.origin || !/^\/api\/v1\/documents\/[A-Za-z0-9]+\/download$/.test(url.pathname)) return undefined;
+    const trusted = url.origin === window.location.origin || (REMOTE_DEVELOPMENT && url.origin === REMOTE_API_ORIGIN);
+    if (!trusted || !/^\/api\/v1\/documents\/[A-Za-z0-9]+\/download$/.test(url.pathname)) return undefined;
     return url.pathname.slice(API_BASE.length);
   } catch { return undefined; }
 }

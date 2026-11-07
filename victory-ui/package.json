@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "vite",
     "dev:mock": "vite --mode mock",
+    "dev:remote": "vite --mode remote",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview",
     "lint": "eslint . --max-warnings=0 && tsc --noEmit -p tsconfig.json",
