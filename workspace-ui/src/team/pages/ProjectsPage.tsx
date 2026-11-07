@@ -3,6 +3,7 @@ import type { Client, Project, TimeEntry } from '../api/types';
 import { useSession } from '../auth/session';
 import { SHOW_BUDGET_HOURS } from '../config';
 import { People } from '../components/Avatar';
+import { ClientLogo } from '../components/ClientLogo';
 import { Seg } from '../components/Seg';
 import { ago, fmtH, hoursOf } from '../domain/dates';
 import { doneGroups, openGroups, type StatusGroup } from '../domain/statuses';
@@ -28,6 +29,7 @@ interface Stats {
 interface Row {
   project: Project;
   client: string;
+  website?: string;
   stats: Stats;
 }
 
@@ -56,18 +58,32 @@ export function statsByProject(entries: TimeEntry[]): Map<string, Stats> {
 }
 
 function summaryGroups(groups: StatusGroup[]): StatusGroup[] {
-  return [openGroups(groups), doneGroups(groups)].flatMap((choices, i) => choices[0] ? [{ ...choices[0], key: i ? 'done' : 'open', label: i ? 'Done' : 'Open', statusIds: choices.flatMap(g => g.statusIds), isDone: Boolean(i) }] : []);
+  return [openGroups(groups), doneGroups(groups)].flatMap((choices, i) => {
+    if (!choices[0]) return [];
+    return [{
+      ...choices[0],
+      key: i ? 'done' : 'open',
+      label: i ? 'Done' : 'Open',
+      color: i ? 'var(--st-done)' : 'var(--st-ready)',
+      statusIds: choices.flatMap(g => g.statusIds),
+      isDone: Boolean(i),
+    }];
+  });
 }
-function useSummaryCounts(projectId: string) {
+function useSummaryCounts(projectId: string): { counts: Record<string, number | undefined>; groups: StatusGroup[] } {
   const { groups } = useStatusGroups(projectId);
   const summary = useMemo(() => summaryGroups(groups), [groups]);
-  return useProjectCounts(projectId, summary);
+  const counts = useProjectCounts(projectId, summary);
+  return { counts: {
+    open: summary.some(g => !g.isDone) ? counts.open : groups.length ? 0 : undefined,
+    done: summary.some(g => g.isDone) ? counts.done : groups.length ? 0 : undefined,
+  }, groups: summary };
 }
 
 function Distribution({ counts, groups, mini }: { counts: Record<string, number | undefined>; groups: StatusGroup[]; mini?: boolean }) {
   const total = groups.reduce((sum, g) => sum + (counts[g.key] ?? 0), 0) || 1;
   return (
-    <span className={mini ? 'mini' : 'dist'} aria-hidden="true">
+    <span className={mini ? 'mini' : 'dist'} role="img" aria-label={groups.map(g => `${counts[g.key] ?? 'Loading'} ${g.label.toLowerCase()}`).join(', ') || 'Loading task status'}>
       {groups.map((g) =>
         counts[g.key] ? <i key={g.key} style={{ width: `${((counts[g.key] ?? 0) / total) * 100}%`, background: g.color }} /> : null,
       )}
@@ -88,28 +104,29 @@ function Budget({ project }: { project: Project }) {
 
 function ProjectCard({
   row,
-  groups,
   selected,
   nameOf,
   onSelect,
 }: {
   row: Row;
-  groups: StatusGroup[];
   selected: boolean;
   nameOf: (id: string) => string;
   onSelect: (id: string) => void;
 }) {
   const { timezone, canAdmin } = useSession();
-  const counts = useSummaryCounts(row.project.id);
+  const { counts, groups } = useSummaryCounts(row.project.id);
   return (
     <button type="button" className="card" aria-pressed={selected} onClick={() => onSelect(row.project.id)}>
-      <div>
-        <div className="client">{row.client}</div>
-        <div className="name">{row.project.name}</div>
+      <div className="project-card-head">
+        <ClientLogo name={row.client} website={row.website} />
+        <div>
+          <div className="client">{row.client}</div>
+          <div className="name">{row.project.name}</div>
+        </div>
       </div>
       <Distribution counts={counts} groups={groups} />
       <div className="counts">
-        {openGroups(groups).map((g) => (
+        {groups.map((g) => (
           <span key={g.key}>
             <span className="dot" style={{ background: g.color }} />
             <span className="num">{counts[g.key] === undefined ? '…' : counts[g.key]?.toLocaleString('en-US')}</span>{' '}
@@ -131,19 +148,17 @@ function ProjectCard({
 
 function ProjectTableRow({
   row,
-  groups,
   selected,
   nameOf,
   onSelect,
 }: {
   row: Row;
-  groups: StatusGroup[];
   selected: boolean;
   nameOf: (id: string) => string;
   onSelect: (id: string) => void;
 }) {
   const { timezone } = useSession();
-  const counts = useSummaryCounts(row.project.id);
+  const { counts, groups } = useSummaryCounts(row.project.id);
   const quiet = row.stats.seconds <= 0;
   const last = useProjectLastLogged(row.project.id, quiet);
   const lastTime = quiet ? last.data ?? 0 : row.stats.last;
@@ -167,11 +182,7 @@ function ProjectTableRow({
       <td>
         <Distribution counts={counts} groups={groups} mini />
       </td>
-      {openGroups(groups).map((g) => (
-        <td key={g.key} className="r num">
-          {counts[g.key]?.toLocaleString('en-US') ?? '…'}
-        </td>
-      ))}
+      <td className="r num">{counts.open?.toLocaleString('en-US') ?? '…'}</td>
       <td className="r num">{fmtH(hoursOf(row.stats.seconds))}</td>
       <td className="r">
         <span className="num">{fmtH(row.project.current_hours)}</span>
@@ -187,7 +198,7 @@ function ProjectTableRow({
 
 function QuietRow({ row, onSelect }: { row: Row; onSelect: (id: string) => void }) {
   const { timezone } = useSession();
-  const counts = useSummaryCounts(row.project.id);
+  const { counts } = useSummaryCounts(row.project.id);
   const last = useProjectLastLogged(row.project.id);
   return (
     <li>
@@ -215,8 +226,6 @@ export function ProjectsPage() {
   const clients = useClientMap();
   const entriesQ = useLast30Days();
   const myTasks = useMyRecentTasks();
-  const { groups: statuses } = useStatusGroups();
-  const groups = useMemo(() => summaryGroups(statuses), [statuses]);
   const nameOf = usePeople();
 
   const [mine, setMine] = useState(true);
@@ -247,6 +256,7 @@ export function ProjectsPage() {
       .map((project) => ({
         project,
         client: clientName(clients.get(project.client_id) as Client | undefined),
+        website: clients.get(project.client_id)?.website,
         stats: stats.get(project.id) ?? empty,
       }))
       .filter(
@@ -329,11 +339,7 @@ export function ProjectsPage() {
                 <tr>
                   <th>Project</th>
                   <th>Status</th>
-                  {openGroups(groups).map((g) => (
-                    <th key={g.key} className="r">
-                      {g.label}
-                    </th>
-                  ))}
+                  <th className="r">Open</th>
                   <th className="r">{canAdmin ? 'Hours, 30 days' : 'Your hours, 30 days'}</th>
                   <th className="r">{SHOW_BUDGET_HOURS ? 'Hours / budget' : 'Hours'}</th>
                   <th>Last time</th>
@@ -345,7 +351,6 @@ export function ProjectsPage() {
                   <ProjectTableRow
                     key={row.project.id}
                     row={row}
-                    groups={groups}
                     selected={false}
                     nameOf={nameOf}
                     onSelect={onSelect}
@@ -360,7 +365,6 @@ export function ProjectsPage() {
               <ProjectCard
                 key={row.project.id}
                 row={row}
-                groups={groups}
                 selected={false}
                 nameOf={nameOf}
                 onSelect={onSelect}

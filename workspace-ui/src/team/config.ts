@@ -3,6 +3,10 @@
 /** Avaza remains the source of truth while the team evaluates this app. */
 export const EVALUATION_MODE = true;
 
+/** Opt-in, loopback-only Vite mode. These controls are removed from production builds. */
+export const REMOTE_DEVELOPMENT = import.meta.env.DEV && import.meta.env.MODE === 'remote';
+export const REMOTE_API_ORIGIN = 'https://projects.victorycto.com';
+
 /** Budgeted hours on project cards and the project list (approved by the owner). */
 export const SHOW_BUDGET_HOURS = true;
 

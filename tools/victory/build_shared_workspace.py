@@ -37,6 +37,9 @@ def canonical_files() -> dict[str, bytes]:
         seen.add(name)
         if name in HOST_ADAPTERS:
             continue
+        # Images are shared dependencies too; copy their bytes without parsing them as TS.
+        if path.suffix.lower() not in {".ts", ".tsx", ".js", ".jsx"}:
+            continue
         for specifier in re.findall(r"from ['\"]([^'\"]+)['\"]", path.read_text()):
             if not specifier.startswith("."):
                 continue
