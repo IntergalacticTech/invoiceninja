@@ -1,27 +1,19 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { createTask, getTask, listTasks, putTimeLog, startTaskTimer, stopTaskTimer } from '../api/endpoints';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { annotateTimerInterval, getOrCreateTimerTask, getRunningTasks, getTask, listTasks, startTaskTimer, stopTaskTimer } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import type { Task } from '../api/types';
 import { useSession } from '../auth/session';
-import { GENERAL_TASK_TITLE } from '../config';
-import { parseTimeLog, runningEntry, serializeTimeLog, withEntryNote } from '../domain/timeLog';
+import { parseTimeLog, runningEntry } from '../domain/timeLog';
 import { isTaskRunning, myCopy, workItemKey, type WorkItem } from '../domain/workItems';
 import { notify } from '../toasts';
 import { useMyRecentTasks } from './queries';
 
 /**
- * The one running timer per person.
- *
- * - Detected on load from my most recently updated tasks: any whose time_log has an entry with end 0.
- * - Start on a card uses my copy of the work item; if I have none, a copy is created
- *   (POST /tasks, same description, assigned to me, card status) and then started (PUT ?start=true).
- * - Starting anything while a timer runs stops the running one first.
- * - The note: TaskController::update ignores the body's time_log when ?start/?stop is present and
- *   TaskRepository::start always writes "" as the entry description, so the note cannot travel with
- *   start/stop. After ?stop=true we take the returned (fresh) time_log, set the description (index 2)
- *   of the entry that began at our start time, and PUT only {time_log}. The same write happens when
- *   the note field loses focus while running, so a note survives a reload.
+ * One source-owned running timer, independent of recent-task pagination.
+ * Commands serialize within this host and use durable source receipts. Shared work
+ * gets an owned copy through the source-derived timer-task operation; private entry
+ * notes update one owned interval without replacing any time or billing values.
  */
 
 export interface Running {
@@ -64,15 +56,18 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   const me = user.id;
   const qc = useQueryClient();
   const recent = useMyRecentTasks();
+  const activeTimers = useQuery({ queryKey: ['tasks', 'running', me], queryFn: getRunningTasks, staleTime: 15_000, refetchInterval: 30_000 });
   const recentKey = useMemo(() => ['tasks', 'mine', 'recent', me], [me]);
 
-  const running = useMemo(() => findRunning(recent.data), [recent.data]);
+  const running = useMemo(() => activeTimers.isError ? null : findRunning(activeTimers.data || recent.data), [activeTimers.data, activeTimers.isError, recent.data]);
   const runningRef = useRef(running);
   runningRef.current = running;
 
   const [note, setNoteState] = useState('');
   const noteRef = useRef('');
+  const nextDraft = useRef<string | null>(null);
   const setNote = useCallback((value: string) => {
+    nextDraft.current = runningRef.current ? null : value;
     noteRef.current = value;
     setNoteState(value);
   }, []);
@@ -81,21 +76,27 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   const prefilledFor = useRef<string>('');
   useEffect(() => {
     if (!running) return;
-    const id = `${running.task.id}:${running.start}`;
+    const log = parseTimeLog(running.task.time_log);
+    const index = log.findIndex(entry => entry[0] === running.start && entry[1] === 0);
+    const id = `${running.task.id}:${running.start}:${index}`;
     if (prefilledFor.current === id) return;
     prefilledFor.current = id;
-    const entry = parseTimeLog(running.task.time_log).find((e) => e[0] === running.start);
-    if (entry?.[2] && !noteRef.current) setNote(entry[2]);
-  }, [running, setNote]);
+    const entry = log[index];
+    const value = nextDraft.current ?? entry?.[2] ?? '';
+    nextDraft.current = null; noteRef.current = value; setNoteState(value);
+  }, [running]);
 
+  const receipts = useRef(new Map<string, string>());
+  const receiptFor = useCallback((key: string) => { let id = receipts.current.get(key); if (!id) { id = crypto.randomUUID(); receipts.current.set(key, id); } return id; }, []);
   const [busyCount, setBusyCount] = useState(0);
   const queue = useRef<Promise<void>>(Promise.resolve());
 
   const upsert = useCallback(
     (task: Task) => {
       qc.setQueryData<Task[]>(recentKey, (old) => [task, ...(old ?? []).filter((t) => t.id !== task.id)]);
+      qc.setQueryData<Task[]>(['tasks', 'running', me], old => [...(isTaskRunning(task) ? [task] : []), ...(old || []).filter(item => item.id !== task.id)]);
     },
-    [qc, recentKey],
+    [qc, recentKey, me],
   );
 
   const refreshAfter = useCallback(
@@ -106,6 +107,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
         void qc.invalidateQueries({ queryKey: ['tasks', 'last', pid] });
       }
       void qc.invalidateQueries({ queryKey: ['tasks', 'mine'] });
+      void qc.invalidateQueries({ queryKey: ['tasks', 'running'] });
       void qc.invalidateQueries({ queryKey: ['time_entries'] });
     },
     [qc],
@@ -140,25 +142,29 @@ export function TimerProvider({ children }: { children: ReactNode }) {
 
   const stopRunning = useCallback(
     async (r: Running): Promise<void> => {
-      const stopped = await stopTaskTimer(r.task.id);
+      const annotation = noteRef.current.trim();
+      const fresh = await getTask(r.task.id);
+      const stopped = isTaskRunning(fresh) ? await stopTaskTimer(r.task.id, receiptFor(`stop:${fresh.id}:${fresh.time_log}`)) : fresh;
       upsert(stopped);
       runningRef.current = null;
-      const log = withEntryNote(parseTimeLog(stopped.time_log), r.start, noteRef.current.trim());
-      if (log) upsert(await putTimeLog(stopped.id, serializeTimeLog(log)));
-      setNote('');
+      const entry = parseTimeLog(stopped.time_log).filter(item => item[0] === r.start).slice(-1)[0];
+      const log = entry && entry[2] !== annotation;
+      if (log) upsert(await annotateTimerInterval(stopped.id, r.start, annotation, receiptFor(JSON.stringify([stopped.id, r.start, annotation]))));
+      nextDraft.current = null; noteRef.current = ''; setNoteState('');
     },
-    [setNote, upsert],
+    [upsert, receiptFor],
   );
 
   const startTask = useCallback(
     async (task: Task): Promise<void> => {
-      const started = await startTaskTimer(task.id);
+      const fresh = await getTask(task.id);
+      const started = isTaskRunning(fresh) ? fresh : await startTaskTimer(task.id, receiptFor(`start:${fresh.id}:${fresh.time_log}`));
       if (!isTaskRunning(started)) {
         throw new Error('Invoice Ninja did not start the timer on this task (it may already be invoiced).');
       }
       upsert(started);
     },
-    [upsert],
+    [upsert, receiptFor],
   );
 
   /** My copy on the server, in case the board did not have it loaded (e.g. a done copy). */
@@ -181,19 +187,12 @@ export function TimerProvider({ children }: { children: ReactNode }) {
         }
         let copy = myCopy(item, me) ?? (await findMine(item.projectId, item.key));
         if (!copy) {
-          copy = await createTask({
-            project_id: item.projectId,
-            client_id: item.clientId,
-            description: item.description,
-            assigned_user_id: me,
-            status_id: item.statusId || undefined,
-            meta: item.copies.find((t) => t.meta?.avaza)?.meta,
-          });
+          copy = await getOrCreateTimerTask(item.projectId, item.rep.id, item.statusId || undefined, receiptFor(`task:${item.projectId}:${item.key}`));
         }
         await startTask(copy);
         return touched;
       }),
-    [findMine, me, run, startTask, stopRunning],
+    [findMine, me, run, startTask, stopRunning, receiptFor],
   );
 
   const isRunningItem = useCallback(
@@ -219,29 +218,16 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   );
 
   const startGeneral = useCallback(
-    (projectId: string, clientId: string, statusId?: string) =>
+    (projectId: string, _clientId: string, statusId?: string) =>
       run(async () => {
         const touched = [projectId];
-        const key = workItemKey(projectId, GENERAL_TASK_TITLE);
         const current = runningRef.current;
-        if (current) {
-          touched.push(current.task.project_id);
-          await stopRunning(current);
-        }
-        let task = await findMine(projectId, key);
-        if (!task) {
-          task = await createTask({
-            project_id: projectId,
-            client_id: clientId,
-            description: GENERAL_TASK_TITLE,
-            assigned_user_id: me,
-            status_id: statusId,
-          });
-        }
+        if (current) { touched.push(current.task.project_id); await stopRunning(current); }
+        const task = await getOrCreateTimerTask(projectId, undefined, statusId, receiptFor(`general:${projectId}`));
         await startTask(task);
         return touched;
       }),
-    [findMine, me, run, startTask, stopRunning],
+    [run, startTask, stopRunning, receiptFor],
   );
 
   const saveNote = useCallback(
@@ -249,12 +235,14 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       run(async () => {
         const current = runningRef.current;
         if (!current) return [];
+        const annotation = noteRef.current.trim();
         const fresh = await getTask(current.task.id);
-        const log = withEntryNote(parseTimeLog(fresh.time_log), current.start, noteRef.current.trim());
-        if (log) upsert(await putTimeLog(fresh.id, serializeTimeLog(log)));
+        const entry = parseTimeLog(fresh.time_log).filter(item => item[0] === current.start).slice(-1)[0];
+        const log = entry && entry[2] !== annotation;
+        if (log) upsert(await annotateTimerInterval(fresh.id, current.start, annotation, receiptFor(JSON.stringify([fresh.id, current.start, annotation]))));
         return [];
       }, { quiet: true }),
-    [run, upsert],
+    [run, upsert, receiptFor],
   );
 
   const value = useMemo<TimerApi>(

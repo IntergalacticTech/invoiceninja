@@ -1,11 +1,12 @@
 import { useProjects, useStatusGroups } from '../hooks/queries';
-import { href, projectSlug } from '../router';
+import { href, projectSlug, useRoute } from '../router';
 import { ProjectBoard } from './Board';
 import { ProjectTools } from '../components/ProjectTools';
 
 export function ProjectPage({ identifier }: { identifier: string }) {
-  const projects = useProjects();
-  const id = identifier.includes('--') ? identifier.split('--').at(-1) : identifier;
+  const route = useRoute();
+  const projects = useProjects(route.query.get('inactive') === '1');
+  const id = identifier.includes('--') ? identifier.split('--').slice(-1)[0] : identifier;
   const matches = (projects.data ?? []).filter(p => p.id === id || projectSlug(p.name) === identifier);
   const project = matches.length === 1 ? matches[0] : undefined;
   const { groups } = useStatusGroups(project?.id);

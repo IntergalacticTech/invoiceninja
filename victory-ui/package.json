@@ -22,13 +22,15 @@
     "@mui/material": "7.3.11",
     "@mui/x-data-grid-pro": "8.29.5",
     "@tanstack/react-query": "5.81.5",
-    "@victory/workspace": "file:vendor/victory-workspace-0.1.7.tgz",
+    "@victory/workspace": "file:vendor/victory-workspace-0.2.0.tgz",
     "dompurify": "3.4.17",
     "exceljs": "4.4.0",
     "jspdf": "4.2.1",
     "jspdf-autotable": "5.0.9",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "react-markdown": "9.1.0",
+    "remark-gfm": "4.0.1"
   },
   "devDependencies": {
     "@eslint/js": "9.39.4",

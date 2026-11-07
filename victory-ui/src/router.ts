@@ -35,7 +35,7 @@ export function navigate(path: string): void {
   }
 }
 export const projectSlug = (name: string) => name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project';
-export const projectHref = (project: Pick<Project, 'name' | 'id'>) => `/project/${projectSlug(project.name)}--${encodeURIComponent(project.id)}`;
+export const projectHref = (project: Pick<Project, 'name' | 'id'> & { archived_at?: number }) => `/project/${projectSlug(project.name)}--${encodeURIComponent(project.id)}${project.archived_at ? '?inactive=1' : ''}`;
 export function taskHref(id: string): string {
   const [path = '/projects', search = ''] = pathNow().split('?');
   const query = new URLSearchParams(search); query.set('task', id);

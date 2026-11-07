@@ -1,4 +1,5 @@
 import { http, HttpResponse, type HttpResponseResolver } from 'msw';
+import { workItemKey } from '../domain/workItems';
 import type { MockTask, MockUser } from './fixtures';
 import {
   MOCK_TIMEZONE,
@@ -81,7 +82,7 @@ export function makeHandlers(getDb: GetDb, onChange: () => void = () => undefine
     invoice_id: hide(me) ? '' : t.invoice_id,
     duration: 0,
     date: '',
-    due_date: '',
+    due_date: t.due_date || '',
     meta: t.meta ?? {},
     tags: [],
     documents: [],
@@ -128,7 +129,72 @@ export function makeHandlers(getDb: GetDb, onChange: () => void = () => undefine
     return { log: JSON.stringify(value) };
   };
 
+  const receipts = new WeakMap<Db, Map<string, { signature: string; result: { id: string } }>>();
+  const command = (db: Db, me: MockUser, operation: string, body: Record<string, unknown>, action: () => { id: string } | Response) => {
+    const requestId = String(body.request_id || '');
+    if (!/^[0-9a-f-]{36}$/i.test(requestId)) return json({ message: 'A request identifier is required.' }, 422);
+    let ledger = receipts.get(db); if (!ledger) { ledger = new Map(); receipts.set(db, ledger); }
+    const key = `${me.id}:${requestId}`; const signature = JSON.stringify([operation, body]);
+    const prior = ledger.get(key);
+    if (prior) return prior.signature === signature ? json({ data: prior.result }) : json({ message: 'This request identifier belongs to a different action.' }, 409);
+    const result = action(); if (result instanceof Response) return result;
+    ledger.set(key, { signature, result }); onChange(); if (db.failNextCommandReply) { db.failNextCommandReply = false; return HttpResponse.error(); } return json({ data: result });
+  };
+  const createOwned = (db: Db, me: MockUser, projectId: string, description: string, statusId?: string, source?: MockTask): MockTask => {
+    const project = db.projects.find(p => p.id === projectId); if (!project) throw new Error('Project unavailable'); const now = touch(db);
+    const task: MockTask = { id: nextId(db, 't'), user_id: me.id, assigned_user_id: me.id, number: String(db.seq + 1000), description,
+      project_id: projectId, client_id: project.client_id, status_id: statusId || db.statuses[0]?.id || '', status_order: null,
+      time_log: '[]', is_running: false, invoice_id: '', rate: project.task_rate, created_at: now, updated_at: now, archived_at: 0, is_deleted: false,
+      ...(source?.meta?.avaza ? { meta: { avaza: structuredClone(source.meta.avaza) } } : {}),
+      ...(source?.custom_value1 ? { custom_value1: `${source.custom_value1.split(':')[0]}:${me.id}` } : {}),
+    }; db.tasks.push(task); recalcProject(db, projectId); return task;
+  };
   return [
+    http.get(`${API}/victory/workspace`, withAuth(getDb, ({ db, me }) => json({ data: { running_tasks: visibleTasks(db, me).filter(t => !t.is_deleted && !t.archived_at && (t.assigned_user_id || t.user_id) === me.id && parseLog(t.time_log).some(entry => entry[1] === 0)).map(t => ({ id: t.id })) } }))),
+    http.post(`${API}/victory/tasks`, withAuth(getDb, async ({ db, me, request }) => {
+      if (!can(me, 'create_task')) return forbidden();
+      const body = await request.json() as Record<string, unknown>;
+      if (Object.keys(body).some(key => !['request_id', 'project_id', 'description', 'status_id'].includes(key)) || typeof body.description !== 'string' || !body.description.trim() || !db.projects.some(p => p.id === body.project_id)) return json({ message: 'Invalid delivery task.' }, 422);
+      return command(db, me, 'delivery_create_task', body, () => ({ id: createOwned(db, me, String(body.project_id), String(body.description), body.status_id ? String(body.status_id) : undefined).id }));
+    })),
+    http.post(`${API}/victory/workspace/timer-task`, withAuth(getDb, async ({ db, me, request }) => {
+      if (!can(me, 'create_task')) return forbidden();
+      const body = await request.json() as Record<string, unknown>;
+      if (Object.keys(body).some(key => !['request_id', 'project_id', 'task_id', 'status_id'].includes(key)) || !db.projects.some(p => p.id === body.project_id)) return json({ message: 'Invalid timer task.' }, 422);
+      const source = body.task_id ? visibleTasks(db, me).find(t => t.id === body.task_id && t.project_id === body.project_id) : undefined;
+      if (body.task_id && !source) return json({ message: 'Task unavailable.' }, 404);
+      return command(db, me, 'timer_task', body, () => {
+        const description = source?.description || 'General';
+        const existing = db.tasks.find(t => !t.is_deleted && !t.archived_at && (t.assigned_user_id || t.user_id) === me.id && t.project_id === body.project_id && workItemKey(t.project_id, t.description) === workItemKey(String(body.project_id), description));
+        return { id: existing?.id || createOwned(db, me, String(body.project_id), description, source?.status_id || (body.status_id ? String(body.status_id) : undefined), source).id };
+      });
+    })),
+    http.post(`${API}/victory/tasks/:id/workspace`, withAuth(getDb, async ({ db, me, params, request }) => {
+      const task = visibleTasks(db, me).find(t => t.id === params.id); if (!task || !canEdit(me, task)) return forbidden();
+      const body = await request.json() as Record<string, unknown>;
+      return command(db, me, `task_action:${task.id}`, body, () => {
+        if (body.expected_updated_at !== undefined && body.expected_updated_at !== task.updated_at) return json({ message: 'This task changed. Refresh before editing.' }, 409);
+        if (body.action === 'start' || body.action === 'stop') {
+          if ((task.assigned_user_id || task.user_id) !== me.id) return forbidden();
+          if (body.action === 'start') {
+            if (db.tasks.some(t => t.id !== task.id && (t.assigned_user_id || t.user_id) === me.id && parseLog(t.time_log).some(entry => entry[1] === 0))) return json({ message: 'Stop the running timer before starting another.' }, 409);
+            startTask(db, task);
+          } else stopTask(db, task);
+        } else if (body.action === 'update') { applyFields(db, task, body); if ('due_date' in body) task.due_date = body.due_date == null ? '' : String(body.due_date); task.updated_at = touch(db); }
+        else return json({ message: 'Invalid task action.' }, 422);
+        recalcProject(db, task.project_id); return { id: task.id };
+      });
+    })),
+    http.post(`${API}/victory/tasks/:id/timer-note`, withAuth(getDb, async ({ db, me, params, request }) => {
+      const task = visibleTasks(db, me).find(t => t.id === params.id); if (!task || (task.assigned_user_id || task.user_id) !== me.id) return forbidden();
+      const body = await request.json() as Record<string, unknown>;
+      return command(db, me, `timer_note:${task.id}`, body, () => {
+        const logs = parseLog(task.time_log); const matches = logs.map((entry, index) => entry[0] === body.started_at ? index : -1).filter(index => index >= 0);
+        if (matches.length !== 1) return json({ message: 'The interval changed.' }, 409);
+        const index = matches[0]; const entry = index === undefined ? undefined : logs[index]; if (!entry) return json({ message: 'The interval changed.' }, 409);
+        entry[2] = String(body.note || ''); task.time_log = JSON.stringify(logs); task.updated_at = touch(db); return { id: task.id };
+      });
+    })),
     http.get(`${API}/victory/projects/:id/workflow`, withAuth(getDb, ({ db, params }) => {
       if (!db.projects.some(p => p.id === params.id)) return json({ message: 'Project unavailable' }, 404);
       const sections = [...new Set(db.tasks.filter(t => t.project_id === params.id).map(t => /^Section:\s*(.+)$/m.exec(t.description)?.[1]).filter(Boolean))];

@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react';
-import { http, passthrough } from 'msw';
+import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import { handleOAuthCallback } from '../auth/oauthCallback';
 import { browser } from '../browser';
@@ -55,14 +55,27 @@ describe('session and admin link', () => {
 });
 
 describe('timer', () => {
+  it('keeps an explicitly drafted note when starting a new timer', async () => {
+    const { user } = renderApp({ as: 'u_sam', hash: '#/projects/p_asl' });
+    await screen.findByRole('button', { name: 'Start' });
+    await user.type(screen.getByRole('textbox', { name: 'Note for this time entry' }), 'Prepared before starting');
+    await user.click(screen.getByRole('button', { name: 'Start' }));
+    await screen.findByRole('button', { name: 'Stop' });
+    expect(screen.getByRole('textbox', { name: 'Note for this time entry' })).toHaveValue('Prepared before starting');
+    await user.click(screen.getByRole('button', { name: 'Stop' }));
+    await waitFor(() => expect(getDb().tasks.some(task => task.description === 'General' && parseLog(task.time_log).some(entry => entry[2] === 'Prepared before starting' && entry[1] !== 0))).toBe(true));
+  });
+
   it('creates my copy of a card I have no copy of, then starts it', async () => {
     const { user } = renderApp({ as: 'u_sam', hash: '#/projects/p_edv' });
     const play = await screen.findByRole('button', { name: 'Start timer on Monthly Theme & Plugin Updates' }, { timeout: 5000 });
     await user.click(play);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument());
     const w = writes().filter((r) => r.path !== '/refresh_react').map((r) => `${r.method} ${r.path}${r.search.toString() ? `?${r.search}` : ''}`);
-    expect(w[0]).toBe('POST /tasks');
-    expect(w[1]).toMatch(/^PUT \/tasks\/t_\d+\?start=true$/);
+    expect(w[0]).toBe('POST /victory/workspace/timer-task');
+    expect(w[1]).toMatch(/^POST \/victory\/tasks\/t_\d+\/workspace$/);
+    expect((writes().filter(r => r.path !== '/refresh_react')[1]?.body as { action: string }).action).toBe('start');
+    expect(writes().some(r => r.method === 'PUT')).toBe(false);
     const mine = getDb().tasks.find((t) => t.assigned_user_id === 'u_sam' && t.description === 'Monthly Theme & Plugin Updates');
     expect(mine?.status_id).toBe('st_progress');
     expect(parseLog(mine?.time_log ?? '').at(-1)?.[1]).toBe(0);
@@ -77,11 +90,14 @@ describe('timer', () => {
     // Starting another card stops this one first.
     await user.click(screen.getByRole('button', { name: /Start timer on Crimson SoCal/ }));
     await waitFor(() => expect(parseLog(getDb().tasks.find((t) => t.id === 't_3')?.time_log ?? '').at(-1)?.[1]).toBe(0));
-    const order = writes().map((r) => `${r.path}?${r.search}`);
-    expect(order.indexOf('/tasks/t_2?stop=true')).toBeLessThan(order.indexOf('/tasks/t_3?start=true'));
+    const operations = writes();
+    const stop = operations.findIndex(r => r.path === '/victory/tasks/t_2/workspace' && (r.body as { action: string }).action === 'stop');
+    const start = operations.findIndex(r => r.path === '/victory/tasks/t_3/workspace' && (r.body as { action: string }).action === 'start');
+    expect(stop).toBeGreaterThanOrEqual(0);
+    expect(start).toBeGreaterThan(stop);
     expect(parseLog(getDb().tasks.find((t) => t.id === 't_2')?.time_log ?? '').every((e) => e[1] !== 0)).toBe(true);
 
-    // Stop with a note: ?stop=true, then a time_log-only PUT carrying the note. Old entries survive.
+    // Atomic stop and interval annotation preserve the existing time log.
     const before = parseLog(getDb().tasks.find((t) => t.id === 't_3')?.time_log ?? '').length;
     await user.type(screen.getByRole('textbox', { name: 'Note for this time entry' }), 'Margin review');
     await user.click(screen.getByRole('button', { name: 'Stop' }));
@@ -98,16 +114,15 @@ describe('timer', () => {
     const saveHeld = new Promise<void>((resolve) => {
       releaseSave = resolve;
     });
-    server.use(
-      http.get('*/api/v1/tasks/:id', async () => {
-        await saveHeld;
-        return passthrough();
-      }),
-    );
-
     const { user } = renderApp({ as: 'u_sam', hash: '#/projects/p_asl' });
     await user.click(await screen.findByRole('button', { name: /Start timer on Crimson SoCal/ }, { timeout: 5000 }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled());
     await waitFor(() => expect(parseLog(getDb().tasks.find((t) => t.id === 't_3')?.time_log ?? '').at(-1)?.[1]).toBe(0));
+    server.use(http.get('*/api/v1/tasks/:id', async ({ params }) => {
+      await saveHeld;
+      const task = getDb().tasks.find(item => item.id === params.id);
+      return HttpResponse.json({ data: task });
+    }));
 
     await user.type(screen.getByRole('textbox', { name: 'Note for this time entry' }), 'Margin review');
     const stopButton = screen.getByRole('button', { name: 'Stop' });
@@ -119,7 +134,8 @@ describe('timer', () => {
 
     await waitFor(() => expect(parseLog(getDb().tasks.find((t) => t.id === 't_3')?.time_log ?? '').at(-1)?.[1]).not.toBe(0));
     expect(parseLog(getDb().tasks.find((t) => t.id === 't_3')?.time_log ?? '').at(-1)?.[2]).toBe('Margin review');
-    expect(writes().some((r) => r.path === '/tasks/t_3' && r.search.get('stop') === 'true')).toBe(true);
+    expect(writes().some(r => r.path === '/victory/tasks/t_3/workspace' && (r.body as { action: string }).action === 'stop')).toBe(true);
+    expect(writes().some(r => r.method === 'PUT')).toBe(false);
   });
 });
 
@@ -144,5 +160,24 @@ describe('board', () => {
     expect(text).not.toContain('$');
     expect(text).not.toMatch(/\brate\b/i);
     expect(text).not.toMatch(/12,?345|98,?765|787,?500/);
+  });
+});
+
+describe('durable native task creation', () => {
+  it('reuses the original receipt after the server commits but its reply is lost', async () => {
+    const { user } = renderApp({ as: 'u_sam', hash: '#/projects/p_asl' });
+    await user.click(await screen.findByRole('button', { name: 'New task' }));
+    await user.type(screen.getByRole('textbox', { name: 'Task title' }), 'Uncertain reply acceptance');
+    getDb().failNextCommandReply = true;
+    await user.click(screen.getByRole('button', { name: 'Create task' }));
+    await waitFor(() => expect(getDb().tasks.filter(task => task.description === 'Uncertain reply acceptance')).toHaveLength(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create task' })).toBeEnabled());
+    expect(screen.getAllByRole('alert').some(alert => alert.textContent?.includes('Your draft is kept'))).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Create task' }));
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Task title' })).not.toBeInTheDocument());
+    expect(getDb().tasks.filter(task => task.description === 'Uncertain reply acceptance')).toHaveLength(1);
+    const attempts = writes().filter(request => request.path === '/victory/tasks');
+    expect(attempts).toHaveLength(2);
+    expect((attempts[0]?.body as { request_id: string }).request_id).toBe((attempts[1]?.body as { request_id: string }).request_id);
   });
 });

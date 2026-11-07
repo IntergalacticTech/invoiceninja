@@ -426,10 +426,13 @@ Route::group(['middleware' => ['throttle:api', 'token_auth', \App\Http\Middlewar
     Route::get('victory/access/users', [\App\Http\Controllers\Victory\ProjectAccessController::class, 'index']);
     Route::put('victory/access/users/{user}', [\App\Http\Controllers\Victory\ProjectAccessController::class, 'update']);
 
+    Route::post('victory/workspace/timer-task', [\App\Http\Controllers\Victory\WorkspaceTimerController::class, 'task']);
+    Route::post('victory/tasks/{task}/timer-note', [\App\Http\Controllers\Victory\WorkspaceTimerController::class, 'note']);
     Route::post('victory/workspace/tasks', [\App\Http\Controllers\Victory\WorkspaceTaskController::class, 'store']);
     Route::post('victory/tasks/{task}/workspace', [\App\Http\Controllers\Victory\WorkspaceTaskController::class, 'update']);
 
     // VictoryCTO team app
+    Route::post('victory/tasks', [\App\Http\Controllers\Victory\TeamTaskController::class, 'store']);
     Route::get('victory/tasks', [\App\Http\Controllers\Victory\TeamTaskController::class, 'index']);
     Route::get('victory/projects/{project}/people', [\App\Http\Controllers\Victory\ProjectPeopleController::class, 'index']);
     Route::put('victory/projects/{project}/people', [\App\Http\Controllers\Victory\ProjectPeopleController::class, 'update']);

@@ -16,6 +16,7 @@ export interface MockUser {
 }
 
 export interface MockTask {
+  due_date?: string;
   custom_value1?: string;
   meta?: import('../api/types').Task['meta'];
   id: string;

@@ -22,8 +22,9 @@ import { groupWorkItems } from '../domain/workItems';
 
 const FIVE_MIN = 5 * 60 * 1000;
 
-export function useProjects() {
-  return useQuery({ queryKey: ['projects'], queryFn: getProjects, staleTime: FIVE_MIN });
+export function useProjects(includeInactive = false) {
+  const query = useQuery({ queryKey: includeInactive ? ['projects', 'including-inactive'] : ['projects'], queryFn: includeInactive ? getAllProjects : getProjects, staleTime: FIVE_MIN });
+  return { ...query, data: query.isError ? undefined : query.data };
 }
 
 export function useProjectMap(): Map<string, Project> {
@@ -144,13 +145,14 @@ export function useProjectTasks(projectId: string | undefined, groups: StatusGro
   });
 
   const tasks = useMemo(() => {
+    if (open.isError || done.isError) return [];
     const byId = new Map<string, Task>();
     for (const t of [...(open.data ?? []), ...(done.data?.data ?? [])]) {
       const seen = byId.get(t.id);
       if (!seen || t.updated_at >= seen.updated_at) byId.set(t.id, t);
     }
     return [...byId.values()];
-  }, [open.data, done.data]);
+  }, [open.data, done.data, open.isError, done.isError]);
   const doneTotal = done.data?.meta?.pagination?.total ?? done.data?.data.length ?? 0;
 
   return {

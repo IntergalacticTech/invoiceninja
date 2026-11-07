@@ -70,10 +70,20 @@ export const getTask = (id: string) =>
     // retain their own nested meta.
     .then((r) => r.meta ? { ...r.data, meta: r.meta } : r.data);
 
+/** Timer discovery is independent of the recent-task page and current filters. */
+export const getRunningTasks = async () => {
+  const response = await api<{ data: { running_tasks: { id: string }[] } }>('/victory/workspace', { query: { view: 'mine', limit: 1 } });
+  return Promise.all(response.data.running_tasks.map(task => getTask(task.id)));
+};
+
 export interface TaskNote { id: string; author: string; body: string; created_at: string }
 export const getTaskNotes = (id: string) => fetchAll<TaskNote>(`/victory/tasks/${encodeURIComponent(id)}/notes`, {}, 200, 50);
 export const addTaskNote = (id: string, body: string, mentions: string[] = [], requestId: string = crypto.randomUUID()) =>
   api<ItemResponse<TaskNote>>(`/victory/tasks/${encodeURIComponent(id)}/notes`, { method: 'POST', body: { body, mentions, request_id: requestId } }).then(r => r.data);
+
+/** Atomic text/status edits preserve native time and billing fields. */
+export const updateTaskDetails = (id: string, value: { description: string; status_id?: string; due_date: string | null; expected_updated_at: number }, requestId: string) =>
+  api(`/victory/tasks/${encodeURIComponent(id)}/workspace`, { method: 'POST', body: { action: 'update', ...value, request_id: requestId } });
 
 export interface NewTask {
   project_id: string;
@@ -82,25 +92,41 @@ export interface NewTask {
   assigned_user_id: string;
   status_id?: string;
   meta?: Task['meta'];
+  request_id?: string;
 }
 
-export const createTask = (task: NewTask) =>
-  api<ItemResponse<Task>>('/tasks', { method: 'POST', body: task }).then((r) => r.data);
+export const createTask = async (task: NewTask) => {
+  const result = await api<ItemResponse<{ id: string }>>('/victory/tasks', { method: 'POST', body: {
+    project_id: task.project_id, description: task.description, status_id: task.status_id,
+    request_id: task.request_id || crypto.randomUUID(),
+  } });
+  return getTask(result.data.id);
+};
+export const getOrCreateTimerTask = async (projectId: string, taskId: string | undefined, statusId: string | undefined, requestId: string) => {
+  const result = await api<ItemResponse<{ id: string }>>('/victory/workspace/timer-task', { method: 'POST', body: {
+    project_id: projectId, task_id: taskId, status_id: statusId, request_id: requestId,
+  } });
+  return getTask(result.data.id);
+};
+export const annotateTimerInterval = async (taskId: string, startedAt: number, note: string, requestId: string) => {
+  await api(`/victory/tasks/${encodeURIComponent(taskId)}/timer-note`, { method: 'POST', body: { started_at: startedAt, note, request_id: requestId } });
+  return getTask(taskId);
+};
 
 /**
  * TaskController::update with ?start=true runs TaskRepository::start, which appends
  * [now, 0, "", true]. The body's time_log is ignored on this path, so we send an empty body.
  */
-export const startTaskTimer = (id: string) =>
-  api<ItemResponse<Task>>(`/tasks/${id}`, { method: 'PUT', query: { start: 'true' }, body: {} }).then(
-    (r) => r.data,
-  );
+export const startTaskTimer = async (id: string, requestId: string = crypto.randomUUID()) => {
+  await api(`/victory/tasks/${encodeURIComponent(id)}/workspace`, { method: 'POST', body: { action: 'start', request_id: requestId } });
+  return getTask(id);
+};
 
-/** ?stop=true closes the last entry whose end is 0 (TaskRepository::stop). */
-export const stopTaskTimer = (id: string) =>
-  api<ItemResponse<Task>>(`/tasks/${id}`, { method: 'PUT', query: { stop: 'true' }, body: {} }).then(
-    (r) => r.data,
-  );
+/** Atomic stop retains every interval and uses the source's durable command receipt. */
+export const stopTaskTimer = async (id: string, requestId: string = crypto.randomUUID()) => {
+  await api(`/victory/tasks/${encodeURIComponent(id)}/workspace`, { method: 'POST', body: { action: 'stop', request_id: requestId } });
+  return getTask(id);
+};
 
 /**
  * Rewrite a task's time_log. ONLY ever send time_log here: a plain PUT without time_log makes
