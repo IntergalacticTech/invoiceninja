@@ -1,19 +1,13 @@
-# One-click release: Actions -> release -> Run workflow.
-#
-# Picks the next tag for the version in VERSION.txt (v5.13.49-victory.3 after
-# .2, or .1 for a new upstream version), creates it on the chosen branch, then
-# runs build-image.yml for that tag in the same run: release tarball, GitHub
-# release, arm64 image pushed to ECR. Deploy by setting image_tag in
-# twenty-crm-infra stacks/invoiceninja.
+# A deliberate release of a merged, CI-validated production deployment PR.
 name: release
 
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: "Branch or commit to release"
+      pr_number:
+        description: "Merged deployment PR number (base: victory/team-app)"
+        type: string
         required: true
-        default: victory/team-app
 
 permissions:
   contents: read
@@ -24,18 +18,67 @@ concurrency:
 
 jobs:
   tag:
-    name: Create the next tag
+    name: Verify deployment candidate and create the next tag
+    if: github.ref == 'refs/heads/victory/team-app'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
+      actions: read
+      pull-requests: read
     outputs:
       tag: ${{ steps.next.outputs.tag }}
     steps:
+      - name: Require a merged production PR with successful checks
+        id: candidate
+        uses: actions/github-script@v8
+        env:
+          DEPLOYMENT_PR: ${{ inputs.pr_number }}
+        with:
+          script: |
+            const number = process.env.DEPLOYMENT_PR;
+            if (!/^[1-9][0-9]*$/.test(number)) throw new Error('Expected a PR number');
+            const repo = context.repo;
+            const {data: pr} = await github.rest.pulls.get({...repo, pull_number: Number(number)});
+            if (!pr.merged || pr.base.ref !== 'victory/team-app' ||
+                pr.head.repo?.full_name !== `${repo.owner}/${repo.repo}` ||
+                !pr.labels.some(label => label.name === 'deployment')) {
+              throw new Error('Release requires a merged same-repository deployment PR into victory/team-app');
+            }
+            const {data} = await github.rest.actions.listWorkflowRuns({
+              ...repo, workflow_id: 'victory-ci.yml', event: 'pull_request',
+              head_sha: pr.head.sha, per_page: 100
+            });
+            // Ignore skipped runs caused by unrelated metadata changes; never fall back
+            // to an old success after a newer failure, cancellation or active run.
+            const run = data.workflow_runs.find(run => run.conclusion !== 'skipped');
+            if (!run || run.status !== 'completed' || run.conclusion !== 'success') {
+              throw new Error('The latest deployment checks for this PR head must pass');
+            }
+            core.setOutput('run_id', String(run.id));
+            core.setOutput('head_sha', pr.head.sha);
+            core.setOutput('merge_sha', pr.merge_commit_sha);
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: deployment-candidate
+          path: ${{ runner.temp }}/deployment-candidate
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.candidate.outputs.run_id }}
+
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ steps.candidate.outputs.merge_sha }}
           fetch-depth: 0
           fetch-tags: true
+
+      - name: Verify that the merged code is exactly what CI tested
+        env:
+          DEPLOYMENT_PR: ${{ inputs.pr_number }}
+          DEPLOYMENT_HEAD_SHA: ${{ steps.candidate.outputs.head_sha }}
+        run: |
+          git merge-base --is-ancestor HEAD origin/victory/team-app
+          python3 tools/victory/release_candidate.py verify "$RUNNER_TEMP/deployment-candidate/deployment-candidate.json"
 
       - id: next
         name: Work out and push the tag
@@ -47,18 +90,19 @@ jobs:
           TAG="v${VERSION}-victory.${N}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${TAG}" -m "VictoryCTO build ${N} of Invoice Ninja ${VERSION} from ${{ inputs.ref }} ($(git rev-parse --short HEAD))"
-          git push origin "refs/tags/${TAG}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "Tagged **${TAG}** at $(git rev-parse --short HEAD) on ${{ inputs.ref }}" >> "$GITHUB_STEP_SUMMARY"
+          git tag -a "$TAG" -m "VictoryCTO build $N of Invoice Ninja $VERSION ($(git rev-parse --short HEAD))"
+          git push origin "refs/tags/$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Tagged **$TAG** at $(git rev-parse --short HEAD) after verifying deployment CI" >> "$GITHUB_STEP_SUMMARY"
 
   build:
     name: Build and publish
-    needs: [tag]
+    needs: tag
     permissions:
       contents: write
       id-token: write
     uses: ./.github/workflows/build-image.yml
     with:
       tag: ${{ needs.tag.outputs.tag }}
-      publish: true
+    secrets:
+      MUI_X_LICENSE_KEY: ${{ secrets.MUI_X_LICENSE_KEY }}

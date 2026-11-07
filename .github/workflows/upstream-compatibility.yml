@@ -1,9 +1,7 @@
 name: upstream-compatibility
 
 on:
-  pull_request:
-    branches: ["victory/**"]
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -15,6 +13,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
       - name: Compare the fork with the latest upstream release
         env:
           GH_TOKEN: ${{ github.token }}

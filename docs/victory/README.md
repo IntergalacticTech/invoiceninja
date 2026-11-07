@@ -45,8 +45,8 @@ authorized until evaluation is complete.
 | `GET/POST /api/v1/victory/tasks/{task}/notes` | Team notes, scoped by company, project and task visibility; independent of imported metadata. | `app/Http/Controllers/Victory/TaskNoteController.php` |
 
 Tests: `tests/Feature/Auth/OidcOnlyTest.php`, `tests/Feature/FinancialVisibilityTest.php`,
-`tests/Feature/Victory/VictoryEndpointsTest.php`. The `victory-ci` workflow runs them (and the team
-app's lint, tests and build) on every push to `victory/**`.
+`tests/Feature/Victory/`. The deployment CI policy below runs these alongside the
+team app's lint, tests and build.
 
 ## Two front ends, one backend
 
@@ -88,10 +88,33 @@ manager/provider leaves normal transports available when evaluation mode is off.
 one synthetic message to the sandbox. It never prints credentials or mail bodies.
 The infrastructure deployment removes SES send permissions during evaluation.
 
-Run **Actions → release → Run workflow** (pick the branch, default
-`victory/team-app`). It creates the next tag `v<upstream version>-victory.<n>`
-(for example `v5.13.49-victory.3`) and runs `build-image` for it. Pushing such a
-tag by hand still works too. The `build-image` workflow builds the release tarball (Composer, upstream React app,
+### Deployment CI policy
+
+Keep development PRs in draft. When preparing a production deployment, target
+`victory/team-app`, add the `deployment` label, and mark the PR ready. Only
+same-repository, ready, labelled PRs start runners. Updates to such candidates
+rerun checks and cancel superseded runs; unrelated label/title edits do not.
+Branch pushes, draft PRs and tag pushes do not start builds. Retargeting a
+stacked PR to the production branch starts its checks once it is ready and
+labelled. The upstream compatibility report is part of this single CI run.
+
+The inherited `phpunit` and `React Release` workflows are **disabled in this
+fork's Actions settings**. Their source files remain intact for upstream merges.
+They target upstream branches/releases, with a 32-job PHP matrix and a separate
+release publisher. Keep them disabled and audit workflow changes during every
+upstream upgrade. No workflow in this fork is scheduled.
+
+After CI passes, merge the PR and run **Actions → release → Run workflow** on
+`victory/team-app`, supplying the merged PR number. Release validates that the
+latest deployment checks passed for that PR head and that the merged Git tree
+matches the recorded tested tree. If the base changed since CI, update the PR
+branch from the base to create a fresh test run before merging. Candidate
+artifacts expire after 14 days. Release fails closed
+without that evidence; arbitrary branches cannot be released through this path.
+
+Release creates the next tag `v<upstream version>-victory.<n>`
+(for example `v5.13.49-victory.3`) and calls the reusable `build-image` workflow
+once, explicitly passing the MUI Pro license secret. It builds the release tarball (Composer, upstream React app,
 team app into `public/team`), publishes it as a GitHub release, builds the
 official Debian image for arm64 without the Saxon extension, and pushes it to
 ECR `invoiceninja`. Deploy by setting `image_tag` in
@@ -108,7 +131,7 @@ by the fork's regression tests. Avoid modifying core time/billing semantics to
 add collaboration features.
 
 `upstream-compatibility` reports merge conflicts against the latest stable
-upstream release on each pull request and can also be run manually. It compares
+upstream release as part of deployment PR checks. It compares
 trees using `VERSION.txt` as the upstream base, without updating the branch or
 running migrations. Conflict warnings are informational so an upstream release
 does not block unrelated fixes; failures to run the check fail the job.

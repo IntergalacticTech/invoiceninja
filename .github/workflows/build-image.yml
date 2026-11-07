@@ -1,7 +1,7 @@
 # Builds a VictoryCTO release of Invoice Ninja from this fork and pushes the
 # container image to ECR (account 732770059798, repository "invoiceninja").
 #
-#   git tag v5.13.49-victory.1 && git push origin v5.13.49-victory.1
+# Called only by release.yml after validating a merged deployment PR.
 #
 # 1. release: production Composer install + compiled React UI, packed the way
 #    upstream's React Release workflow does it, attached to a GitHub release on
@@ -16,25 +16,14 @@
 name: build-image
 
 on:
-  push:
-    tags:
-      - "v*-victory.*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Existing release tag to rebuild the image for (e.g. v5.13.49-victory.1)"
-        required: true
-  # Called by release.yml right after it creates the tag (a tag pushed with the
-  # workflow token does not trigger the push event above).
   workflow_call:
     inputs:
       tag:
         type: string
         required: true
-      publish:
-        description: "Build the tarball and GitHub release too (not only the image)"
-        type: boolean
-        default: true
+    secrets:
+      MUI_X_LICENSE_KEY:
+        required: true
 
 permissions:
   contents: read
@@ -49,16 +38,16 @@ env:
 jobs:
   release:
     name: Release tarball
-    if: github.event_name == 'push' || inputs.publish == true
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     permissions:
       contents: write # create the release + upload the asset
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+      TAG: ${{ inputs.tag }}
       VITE_MUI_X_LICENSE_KEY: ${{ secrets.MUI_X_LICENSE_KEY }}
       MUI_X_TELEMETRY_DISABLED: "1"
     outputs:
-      tag: ${{ inputs.tag || github.ref_name }}
+      tag: ${{ inputs.tag }}
     steps:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -69,13 +58,12 @@ jobs:
       - name: Checkout fork at the tag
         uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.tag }}
           fetch-depth: 1
 
       - name: Check the tag matches VERSION.txt
         run: |
           set -euo pipefail
-          TAG="${TAG}"
           VERSION="$(tr -d '[:space:]' < VERSION.txt)"
           case "$TAG" in
             "v${VERSION}-victory."*) echo "tag $TAG builds Invoice Ninja $VERSION" ;;
@@ -109,9 +97,9 @@ jobs:
         if: hashFiles('victory-ui/package.json') != ''
         run: |
           set -euo pipefail
+          test -n "$VITE_MUI_X_LICENSE_KEY"
           cd victory-ui
           npm ci
-          npm test -- --run
           npm run build
           mkdir -p ../public/team
           cp -r dist/. ../public/team/
@@ -131,32 +119,32 @@ jobs:
           find . -path ./vendor -prune -o -type f -exec chmod 644 {} \+
           find . -path ./vendor -prune -o -type d -exec chmod 755 {} \+
           shopt -s dotglob
-          tar --exclude='public/storage' --exclude='invoiceninja.zip' -zcf "$RUNNER_TEMP/invoiceninja.tar.gz" *
+          tar --exclude='public/storage' --exclude='invoiceninja.zip' -zcf "$RUNNER_TEMP/invoiceninja.tar.gz" ./*
           ls -l "$RUNNER_TEMP/invoiceninja.tar.gz"
 
       - name: Create GitHub release with the tarball
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.tag || github.ref_name }}
-          name: ${{ inputs.tag || github.ref_name }}
-          body: "VictoryCTO build of Invoice Ninja ${{ inputs.tag || github.ref_name }} (fork of invoiceninja/invoiceninja v5-stable with SSO-only mode)."
+          tag_name: ${{ inputs.tag }}
+          name: ${{ inputs.tag }}
+          body: "VictoryCTO build of Invoice Ninja ${{ inputs.tag }} (fork of invoiceninja/invoiceninja v5-stable with SSO-only mode)."
           files: ${{ runner.temp }}/invoiceninja.tar.gz
           fail_on_unmatched_files: true
 
   image:
     name: Build and push image (arm64)
     needs: [release]
-    # Runs after a successful release, or alone when only rebuilding an image.
-    if: always() && (needs.release.result == 'success' || needs.release.result == 'skipped')
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write # OIDC to AWS
     steps:
       - name: Resolve tag
         id: tag
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          TAG="${{ inputs.tag || github.ref_name }}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/invoiceninja.tar.gz" >> "$GITHUB_OUTPUT"
 
