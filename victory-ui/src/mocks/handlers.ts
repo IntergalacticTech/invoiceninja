@@ -353,10 +353,31 @@ export function makeHandlers(getDb: GetDb, onChange: () => void = () => undefine
       }),
     ),
 
+    http.get(`${API}/victory/reports/catalog`, withAuth(getDb, ({ db, me, url }) => {
+      if (!isAdmin(me)) return forbidden();
+      return json({ data: { clients: db.clients.filter(c => !c.is_deleted && (url.searchParams.get('all_clients') === '1' || !c.archived_at)).map(c => ({ id: c.id, name: c.display_name || c.name, archived: Boolean(c.archived_at) })), projects: db.projects.filter(p => !p.is_deleted && (url.searchParams.get('all_projects') === '1' || !p.archived_at)).map(p => ({ id: p.id, name: p.name, client_id: p.client_id, archived: Boolean(p.archived_at) })), users: db.users.map(u => ({ id: u.id, name: `${u.first_name} ${u.last_name}` })) } });
+    })),
+    http.get(`${API}/victory/reports/saved`, withAuth(getDb, ({ db, me }) => isAdmin(me) ? json({ data: db.savedReports }) : forbidden())),
+    http.post(`${API}/victory/reports/saved`, withAuth(getDb, async ({ db, me, request }) => {
+      if (!isAdmin(me)) return forbidden();
+      const data = await request.json() as Omit<import('../api/endpoints').SavedReport, 'id' | 'owned'>;
+      const report = { ...data, id: nextId(db, 'report'), owned: true }; db.savedReports.push(report); return json({ data: report }, 201);
+    })),
+    http.put(`${API}/victory/reports/saved/:id`, withAuth(getDb, async ({ db, me, request, params }) => {
+      if (!isAdmin(me)) return forbidden();
+      const report = db.savedReports.find(r => r.id === params.id); if (!report?.owned) return forbidden();
+      Object.assign(report, await request.json()); return json({ data: report });
+    })),
+    http.delete(`${API}/victory/reports/saved/:id`, withAuth(getDb, ({ db, me, params }) => {
+      if (!isAdmin(me) || !db.savedReports.find(r => r.id === params.id)?.owned) return forbidden();
+      db.savedReports = db.savedReports.filter(r => r.id !== params.id); return json({ data: { deleted: true } });
+    })),
     http.get(
-      `${API}/victory/time_entries`,
+      /\/api\/v1\/victory\/(?:time_entries|reports\/time)$/,
       withAuth(getDb, ({ db, me, url }) => {
         const p = url.searchParams;
+        const detailed = url.pathname.endsWith('/reports/time');
+        if (detailed && !isAdmin(me)) return forbidden();
         const from = p.get('start_date') ?? '';
         const to = p.get('end_date') ?? '';
         if (!from || !to) return json({ message: 'start_date and end_date are required' }, 422);
@@ -372,7 +393,7 @@ export function makeHandlers(getDb: GetDb, onChange: () => void = () => undefine
           for (const [s, e, d, b] of parseLog(t.time_log)) {
             const day = ymd(s);
             if (day < from || day > to) continue;
-            out.push({
+            const entry = {
               task_id: t.id,
               project_id: t.project_id,
               client_id: t.client_id,
@@ -383,7 +404,15 @@ export function makeHandlers(getDb: GetDb, onChange: () => void = () => undefine
               description: d ?? '',
               billable: b ?? true,
               task_description: t.description,
-            });
+            };
+            const name = db.users.find(u => u.id === owner); const project = db.projects.find(p => p.id === t.project_id); const client = db.clients.find(c => c.id === t.client_id);
+            if (detailed) {
+              if (['user', 'project', 'client'].some(field => { const ids = p.get(`${field}_ids`); return ids && !ids.split(',').includes(entry[`${field}_id` as 'user_id' | 'project_id' | 'client_id']); })) continue;
+              if (p.get('billable') === 'yes' && !entry.billable || p.get('billable') === 'no' && entry.billable) continue;
+              const detail = { ...entry, id: `${t.id}:${s}`, date: day, user: `${name?.first_name ?? ''} ${name?.last_name ?? ''}`.trim(), project: project?.name ?? '', client: client?.display_name || client?.name || '', task: t.description.split('\n')[0] ?? '', invoice: t.invoice_id || 'Uninvoiced', notes: d ?? '', hours: entry.seconds / 3600 };
+              if (p.get('search') && !Object.values(detail).join(' ').toLowerCase().includes(p.get('search')?.toLowerCase() ?? '')) continue;
+              out.push(detail);
+            } else out.push(entry);
           }
         }
         out.sort((a, b) => a.start - b.start);

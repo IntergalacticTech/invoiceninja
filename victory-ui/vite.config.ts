@@ -52,6 +52,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: '/team/',
+    define: { 'globalThis.__MUI_X_TELEMETRY_DISABLED__': 'true' },
     plugins: [react(), ...(isMock ? [mockNavigations()] : [])],
     // The msw service worker only ships in mock mode; production dist/ has no public files.
     publicDir: isMock ? 'mock-public' : false,

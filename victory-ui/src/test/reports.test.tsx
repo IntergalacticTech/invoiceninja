@@ -3,8 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TimeEntry } from '../api/types';
 import { browser } from '../browser';
 import { buildPivot, entriesToCsv, pivotToCsv, toCsv } from '../domain/pivot';
-import { presetRange } from '../pages/ReportsPage';
+import { presetRange } from '../domain/reportPresets';
 import { renderApp } from './render';
+import { getDb } from './server';
 
 const entry = (over: Partial<TimeEntry>): TimeEntry => ({
   task_id: 't',
@@ -102,38 +103,36 @@ describe('presetRange', () => {
 });
 
 describe('Reports page', () => {
-  it('admin: everyone\'s time in the last 30 days by person, filters, and CSV download', async () => {
+  it('shows detailed grouped time, searches active client choices and downloads the displayed report', async () => {
     const download = vi.spyOn(browser, 'download').mockImplementation(() => undefined);
     const { user } = renderApp({ as: 'u_john', hash: '#/reports' });
-
-    await user.selectOptions(await screen.findByLabelText('Period'), 'last_30');
-    await user.click(within(screen.getByRole('group', { name: 'Rows' })).getByRole('button', { name: 'Person' }));
-    await user.click(within(screen.getByRole('group', { name: 'Columns' })).getByRole('button', { name: 'Total only' }));
-
-    const table = screen.getByRole('table', { name: 'Timesheet' });
-    await waitFor(() => expect(within(table).getByRole('rowheader', { name: 'Sam Larimore' })).toBeInTheDocument(), { timeout: 5000 });
-    expect(within(table).getByRole('rowheader', { name: 'Boyd Hemphill' })).toBeInTheDocument();
-    // Sam in the last 30 days: 3 + 3.5 + 4 + 0.75 = 11.25 h (fixtures log(): entries end daysAgo days ago).
-    const samRow = within(table).getByRole('rowheader', { name: 'Sam Larimore' }).closest('tr');
-    expect(samRow).toHaveTextContent('11.25');
-    expect(screen.getByRole('option', { name: 'Everyone' })).toBeInTheDocument();
-
-    // Filter to Young Life: only Boyd and Sam's Young Life work remain.
-    await user.selectOptions(screen.getByLabelText('Client'), 'c_ygl');
-    await waitFor(() => expect(within(table).queryByRole('rowheader', { name: 'Nicole Obando' })).not.toBeInTheDocument());
-    expect(within(table).getByRole('rowheader', { name: 'Sam Larimore' }).closest('tr')).toHaveTextContent('0.75');
-
-    await user.click(screen.getByRole('button', { name: 'Download table (CSV)' }));
-    expect(download).toHaveBeenCalledTimes(1);
+    const grid = await screen.findByRole('treegrid', {}, { timeout: 5000 });
+    await waitFor(() => expect(within(grid).getAllByText(/Person: Sam Larimore/).length).toBeGreaterThan(0));
+    expect(within(grid).getByRole('columnheader', { name: /Invoice number/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('combobox', { name: 'Clients' }));
+    await user.click(await screen.findByRole('option', { name: 'Young Life' }));
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(within(grid).queryByText(/Person: Nicole Obando/)).toBeNull());
+    await user.click(screen.getByRole('button', { name: 'Download CSV' }));
     const [name, csv] = download.mock.calls[0] as [string, string];
-    expect(name).toMatch(/^timesheet-person-by-none-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.csv$/);
-    expect(csv).toContain('Person,Hours,Total');
-    expect(csv).toContain('Sam Larimore,0.75,0.75');
+    expect(name).toMatch(/^time-report-.*\.csv$/);
+    expect(csv).toContain('Invoice number'); expect(csv).toContain('Agenda + notes');
+    expect(csv).toContain('Grand total'); expect(csv).toContain('Person: Sam Larimore');
+  });
 
-    await user.click(screen.getByRole('button', { name: 'Download entries (CSV)' }));
-    const [, detail] = download.mock.calls[1] as [string, string];
-    expect(detail.split('\r\n')[0]).toBe('﻿Date,Start,End,Hours,Person,Client,Project,Task,Note,Billable');
-    expect(detail).toContain('Weekly status call,Agenda + notes,yes');
+  it('saves and reloads a private or shared report with its filters and layout', async () => {
+    const { user } = renderApp({ as: 'u_john', hash: '#/reports' });
+    await screen.findByRole('treegrid', {}, { timeout: 5000 });
+    await user.type(screen.getByLabelText('Report name'), 'Weekly review');
+    await user.click(screen.getByLabelText('Share with administrators'));
+    await user.click(screen.getByRole('button', { name: 'Save report' }));
+    expect(await screen.findByText('Report saved.')).toBeInTheDocument();
+    expect(getDb().savedReports[0]?.shared).toBe(true);
+    expect(getDb().savedReports[0]?.definition.grid?.groups).toEqual(['user']);
+    await user.type(screen.getByRole('searchbox', { name: 'Search entries' }), 'temporary');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Load saved report' }), getDb().savedReports[0]?.id ?? '');
+    expect(screen.getByRole('searchbox', { name: 'Search entries' })).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Update saved report' })).toBeInTheDocument();
   });
 
   it('team members cannot open reports or see the reports menu', async () => {
