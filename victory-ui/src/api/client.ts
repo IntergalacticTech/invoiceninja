@@ -189,7 +189,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
       throw new ApiError(response.status, message, errors);
     }
 
-    return stripFinancials(parsed) as T;
+    return (/^\/victory\/(?:expenses|invoices)(?:\/|$)/.test(path) ? parsed : stripFinancials(parsed)) as T;
   }
 }
 

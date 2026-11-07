@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Client, Project, TimeEntry } from '../api/types';
 import { useSession } from '../auth/session';
 import { SHOW_BUDGET_HOURS } from '../config';
 import { People } from '../components/Avatar';
 import { Seg } from '../components/Seg';
 import { ago, fmtH, hoursOf } from '../domain/dates';
-import { openGroups, type StatusGroup } from '../domain/statuses';
+import { doneGroups, openGroups, type StatusGroup } from '../domain/statuses';
 import {
   clientName,
   useClientMap,
@@ -17,8 +17,7 @@ import {
   useProjects,
   useStatusGroups,
 } from '../hooks/queries';
-import { navigate } from '../router';
-import { ProjectBoard } from './Board';
+import { navigate, projectHref } from '../router';
 
 interface Stats {
   seconds: number;
@@ -54,6 +53,15 @@ export function statsByProject(entries: TimeEntry[]): Map<string, Stats> {
     map.set(e.project_id, s);
   }
   return map;
+}
+
+function summaryGroups(groups: StatusGroup[]): StatusGroup[] {
+  return [openGroups(groups), doneGroups(groups)].flatMap((choices, i) => choices[0] ? [{ ...choices[0], key: i ? 'done' : 'open', label: i ? 'Done' : 'Open', statusIds: choices.flatMap(g => g.statusIds), isDone: Boolean(i) }] : []);
+}
+function useSummaryCounts(projectId: string) {
+  const { groups } = useStatusGroups(projectId);
+  const summary = useMemo(() => summaryGroups(groups), [groups]);
+  return useProjectCounts(projectId, summary);
 }
 
 function Distribution({ counts, groups, mini }: { counts: Record<string, number | undefined>; groups: StatusGroup[]; mini?: boolean }) {
@@ -92,7 +100,7 @@ function ProjectCard({
   onSelect: (id: string) => void;
 }) {
   const { timezone, canAdmin } = useSession();
-  const counts = useProjectCounts(row.project.id, groups);
+  const counts = useSummaryCounts(row.project.id);
   return (
     <button type="button" className="card" aria-pressed={selected} onClick={() => onSelect(row.project.id)}>
       <div>
@@ -135,7 +143,7 @@ function ProjectTableRow({
   onSelect: (id: string) => void;
 }) {
   const { timezone } = useSession();
-  const counts = useProjectCounts(row.project.id, groups);
+  const counts = useSummaryCounts(row.project.id);
   const quiet = row.stats.seconds <= 0;
   const last = useProjectLastLogged(row.project.id, quiet);
   const lastTime = quiet ? last.data ?? 0 : row.stats.last;
@@ -177,12 +185,9 @@ function ProjectTableRow({
   );
 }
 
-function QuietRow({ row, groups, onSelect }: { row: Row; groups: StatusGroup[]; onSelect: (id: string) => void }) {
+function QuietRow({ row, onSelect }: { row: Row; onSelect: (id: string) => void }) {
   const { timezone } = useSession();
-  const open = openGroups(groups);
-  const first = open[0];
-  const openKey: StatusGroup[] = first ? [{ ...first, key: 'open', statusIds: open.flatMap((g) => g.statusIds) }] : [];
-  const counts = useProjectCounts(row.project.id, openKey);
+  const counts = useSummaryCounts(row.project.id);
   const last = useProjectLastLogged(row.project.id);
   return (
     <li>
@@ -201,14 +206,15 @@ function QuietRow({ row, groups, onSelect }: { row: Row; groups: StatusGroup[]; 
   );
 }
 
-export function ProjectsPage({ selectedId }: { selectedId?: string }) {
+export function ProjectsPage() {
   const session = useSession();
   const { canAdmin, user } = session;
   const projectsQ = useProjects();
   const clients = useClientMap();
   const entriesQ = useLast30Days();
   const myTasks = useMyRecentTasks();
-  const { groups } = useStatusGroups();
+  const { groups: statuses } = useStatusGroups();
+  const groups = useMemo(() => summaryGroups(statuses), [statuses]);
   const nameOf = usePeople();
 
   const [mine, setMine] = useState(false);
@@ -251,18 +257,9 @@ export function ProjectsPage({ selectedId }: { selectedId?: string }) {
 
   const recent = rows.filter((r) => r.stats.seconds > 0);
   const quiet = rows.filter((r) => !(r.stats.seconds > 0));
-  const selected =
-    (projectsQ.data ?? []).find((p) => p.id === selectedId) ?? recent[0]?.project ?? rows[0]?.project ?? undefined;
   const hours = hoursOf(recent.reduce((sum, r) => sum + r.stats.seconds, 0));
 
-  const onSelect = (id: string) => navigate(`/projects/${id}`);
-
-  useEffect(() => {
-    if (!selectedId) return;
-    const el = document.getElementById('board-sec');
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    el?.scrollIntoView?.({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
-  }, [selectedId]);
+  const onSelect = (id: string) => { const project = projectsQ.data?.find(p => p.id === id); if (project) navigate(projectHref(project)); };
 
   const summary = canAdmin
     ? `${rows.length} active projects · ${recent.length} worked on in the last 30 days · ${fmtH(hours)} hours logged`
@@ -345,7 +342,7 @@ export function ProjectsPage({ selectedId }: { selectedId?: string }) {
                     key={row.project.id}
                     row={row}
                     groups={groups}
-                    selected={row.project.id === selected?.id}
+                    selected={false}
                     nameOf={nameOf}
                     onSelect={onSelect}
                   />
@@ -360,7 +357,7 @@ export function ProjectsPage({ selectedId }: { selectedId?: string }) {
                 key={row.project.id}
                 row={row}
                 groups={groups}
-                selected={row.project.id === selected?.id}
+                selected={false}
                 nameOf={nameOf}
                 onSelect={onSelect}
               />
@@ -375,7 +372,6 @@ export function ProjectsPage({ selectedId }: { selectedId?: string }) {
         )}
       </section>
 
-      {selected && groups.length > 0 && <ProjectBoard key={selected.id} project={selected} groups={groups} />}
 
       {layout === 'cards' && quiet.length > 0 && (
         <section aria-labelledby="h-quiet">
@@ -386,7 +382,7 @@ export function ProjectsPage({ selectedId }: { selectedId?: string }) {
           <div className="quiet">
             <ul>
               {shownQuiet.map((row) => (
-                <QuietRow key={row.project.id} row={row} groups={groups} onSelect={onSelect} />
+                <QuietRow key={row.project.id} row={row} onSelect={onSelect} />
               ))}
             </ul>
             {quiet.length > QUIET_SHOWN && (

@@ -1,36 +1,53 @@
-# Checks for the VictoryCTO fork on every push: the team app (lint, tests, build)
-# and the server tests for the fork's own changes (SSO-only, financial hiding,
-# /victory/* endpoints). Upstream's full phpunit matrix stays on v5-stable.
+# Deliberate production candidates only. Drafts and unlabelled PRs use no runners.
 name: victory-ci
 
 on:
-  push:
-    branches:
-      - "victory/**"
-      - "claude/**"
-    paths-ignore:
-      - "docs/**"
   pull_request:
-    branches:
-      - "victory/**"
-  workflow_dispatch:
+    branches: [victory/team-app]
+    types: [opened, reopened, ready_for_review, synchronize, labeled, unlabeled, converted_to_draft, edited]
 
 permissions:
   contents: read
 
 concurrency:
-  group: victory-ci-${{ github.ref }}
+  # Unrelated label/title edits must not cancel an eligible candidate's checks.
+  group: victory-ci-${{ (github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.action != 'edited' || github.event.label.name == 'deployment' || github.event.changes.base != null) && github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  policy:
+    name: Deployment policy
+    if: >-
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'deployment') &&
+      (github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.action != 'edited' ||
+       github.event.label.name == 'deployment' || github.event.changes.base != null)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+      - run: python3 -m unittest discover -s tools/victory -p 'test_*.py'
+
   team-app:
     name: Team app (victory-ui)
+    needs: policy
+    timeout-minutes: 15
+    env:
+      VITE_MUI_X_LICENSE_KEY: ${{ secrets.MUI_X_LICENSE_KEY }}
+      MUI_X_TELEMETRY_DISABLED: "1"
     runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: victory-ui
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+      - name: Require the configured MUI Pro license
+        run: test -n "$VITE_MUI_X_LICENSE_KEY"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -43,6 +60,8 @@ jobs:
 
   server:
     name: Server (fork tests)
+    needs: policy
+    timeout-minutes: 20
     runs-on: ubuntu-24.04
     env:
       DB_CONNECTION: mysql
@@ -79,6 +98,8 @@ jobs:
         options: --health-cmd="redis-cli ping" --health-interval=5s --health-timeout=2s --health-retries=10
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -99,7 +120,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          export COMPOSER_AUTH="$(php -r 'echo json_encode(["github-oauth" => ["github.com" => getenv("GH_TOKEN")]]);')"
+          COMPOSER_AUTH="$(php -r 'echo json_encode(["github-oauth" => ["github.com" => getenv("GH_TOKEN")]]);')"
+          export COMPOSER_AUTH
           composer install --no-interaction --prefer-dist --no-progress
 
       - name: Prepare the application
@@ -118,5 +140,17 @@ jobs:
           vendor/bin/phpunit --no-coverage \
             tests/Feature/Auth/OidcOnlyTest.php \
             tests/Feature/FinancialVisibilityTest.php \
-            tests/Feature/Victory/EvaluationMailTest.php \
             tests/Feature/Victory
+
+      - name: Record the tested deployment candidate
+        run: python3 tools/victory/release_candidate.py record "$RUNNER_TEMP/deployment-candidate.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deployment-candidate
+          path: ${{ runner.temp }}/deployment-candidate.json
+          retention-days: 14
+
+  upstream:
+    name: Upstream compatibility
+    needs: policy
+    uses: ./.github/workflows/upstream-compatibility.yml

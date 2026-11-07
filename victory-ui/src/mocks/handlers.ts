@@ -129,6 +129,15 @@ export function makeHandlers(getDb: GetDb, onChange: () => void = () => undefine
   };
 
   return [
+    http.get(`${API}/victory/projects/:id/workflow`, withAuth(getDb, ({ db, params }) => {
+      if (!db.projects.some(p => p.id === params.id)) return json({ message: 'Project unavailable' }, 404);
+      const sections = [...new Set(db.tasks.filter(t => t.project_id === params.id).map(t => /^Section:\s*(.+)$/m.exec(t.description)?.[1]).filter(Boolean))];
+      return json({ data: { statuses: db.statuses.map(status => ({ ...status, is_done: status.name.toLowerCase() === 'done' })), sections, configured: false } });
+    })),
+    http.get(`${API}/victory/projects/:id/people`, withAuth(getDb, ({ db, params }) => {
+      const assigned = new Set(db.tasks.filter(t => t.project_id === params.id).map(t => t.assigned_user_id || t.user_id));
+      return json({ data: db.users.filter(u => isAdmin(u) || assigned.has(u.id)).map(u => ({ ...transformUser(u), name: `${u.first_name} ${u.last_name}`.trim() })) });
+    })),
     http.get(`${API}/oidc/config`, () => json({ oidc_enabled: true, oidc_provider_label: 'Google', oidc_only: true })),
 
     http.post(`${API}/oidc/exchange`, async ({ request }) => {
@@ -221,7 +230,7 @@ export function makeHandlers(getDb: GetDb, onChange: () => void = () => undefine
     http.get(`${API}/task_statuses`, withAuth(getDb, ({ db, url }) => json(paginate(db.statuses, url)))),
 
     http.get(
-      `${API}/tasks`,
+      /\/api\/v1\/(?:victory\/)?tasks$/,
       withAuth(getDb, ({ db, me, url }) => {
         const p = url.searchParams;
         const include = (p.get('include') ?? '').split(',');
@@ -229,12 +238,14 @@ export function makeHandlers(getDb: GetDb, onChange: () => void = () => undefine
         if (p.get('status') === 'active') list = list.filter((t) => !t.archived_at);
         const project = p.get('project_tasks');
         if (project) list = list.filter((t) => t.project_id === project);
+        const needle = p.get('filter')?.toLowerCase();
+        if (needle) list = list.filter(t => t.description.toLowerCase().includes(needle));
         const assigned = p.get('assigned_user');
         if (assigned) list = list.filter((t) => t.assigned_user_id === assigned);
         const statuses = p.get('task_status');
         if (statuses) {
           const ids = statuses.split(',');
-          list = list.filter((t) => ids.includes(t.status_id) && !t.invoice_id);
+          list = list.filter((t) => ids.includes(t.status_id) && (url.pathname.includes('/victory/') || !t.invoice_id));
         }
         const [col, dir] = (p.get('sort') ?? '').split('|');
         if (col === 'updated_at' || col === 'status_order') {

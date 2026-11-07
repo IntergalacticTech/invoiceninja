@@ -60,10 +60,11 @@ describe('work items', () => {
 
 describe('statuses', () => {
   const s = (id: string, name: string, order: number): TaskStatus => ({ id, name, color: '', status_order: order });
-  it('orders Backlog, Ready, In progress, Done and shows "Ready to do" as Ready; others at the end', () => {
+  it('preserves configured order and exact custom status names', () => {
     const groups = buildStatusGroups([s('4', 'Done', 3), s('9', 'Waiting on client', 1), s('2', 'ready to do', 2), s('3', 'In Progress', 4), s('1', 'Backlog', 0)]);
-    expect(groups.map((g) => g.label)).toEqual(['Backlog', 'Ready', 'In progress', 'Done', 'Waiting on client']);
-    expect(groups[1]?.primaryId).toBe('2');
+    expect(groups.map(g => g.label)).toEqual(['Backlog', 'Waiting on client', 'ready to do', 'Done', 'In Progress']);
+    expect(groups.find(g => g.label === 'Done')?.isDone).toBe(true);
+    expect(groups.find(g => g.label === 'Waiting on client')?.primaryId).toBe('9');
   });
 });
 

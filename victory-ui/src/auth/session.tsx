@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getStatics, refreshReact } from '../api/endpoints';
 import type { CompanyUser, User } from '../api/types';
@@ -6,6 +6,8 @@ import { browserTimezone, isValidTimezone } from '../domain/dates';
 import { fullName } from '../domain/people';
 import { getToken, setToken } from './token';
 import { errorMessage } from '../api/client';
+import { browser } from '../browser';
+import { OIDC_START_PATH } from '../config';
 
 export interface Session {
   user: User;
@@ -105,6 +107,15 @@ export async function loadSession(): Promise<Session> {
 
 export function SessionProvider({ children, fallback }: { children: ReactNode; fallback?: ReactNode }) {
   const q = useQuery({ queryKey: ['session'], queryFn: loadSession, staleTime: Infinity, retry: false });
+  useEffect(() => {
+    if (!q.data || q.data.name.toLowerCase() !== 'new user' || q.data.user.avatar_url) return;
+    try {
+      const key = `victory.google-profile.${q.data.user.id}`;
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, 'requested');
+      browser.assign(OIDC_START_PATH);
+    } catch { /* The header's Refresh profile button remains available. */ }
+  }, [q.data]);
 
   if (q.isPending) {
     return (

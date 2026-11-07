@@ -1,32 +1,21 @@
 import { useMemo, useState, type DragEvent, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { createTask, sortTasks } from '../api/endpoints';
+import { createTask, setTaskWorkflow, sortTasks } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import type { Project, Task } from '../api/types';
 import { useSession } from '../auth/session';
 import { DONE_PAGE_SIZE, SHOW_BUDGET_HOURS } from '../config';
 import { People } from '../components/Avatar';
 import { PlayButton } from '../components/PlayButton';
-import { Seg } from '../components/Seg';
+import { TaskFilters, emptyTaskFilters, filterWorkItems, taskColumns, useTaskColumns, useTaskLayout } from '../components/TaskFilters';
 import { StatusMenu } from '../components/StatusMenu';
 import { ago, fmtH, hoursOf } from '../domain/dates';
 import { groupOf, type StatusGroup } from '../domain/statuses';
 import { groupWorkItems, sortForColumn, type WorkItem } from '../domain/workItems';
-import { clientName, useClientMap, usePeople, useProjectCounts, useProjectTasks } from '../hooks/queries';
+import { clientName, useClientMap, usePeople, useProjectCounts, useProjectTasks, useProjectWorkflow, useDebounced } from '../hooks/queries';
 import { useTimer } from '../hooks/timer';
 import { notify } from '../toasts';
-import { taskHref } from '../router';
-
-type BoardView = 'board' | 'list';
-const VIEW_KEY = 'victory.boardView';
-
-function readView(): BoardView {
-  try {
-    return window.localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'board';
-  } catch {
-    return 'board';
-  }
-}
+import { navigate, taskHref } from '../router';
 
 /**
  * Plan a move for POST /tasks/sort. Every copy of the moved card goes to the target column's
@@ -88,17 +77,18 @@ function useMoveItem(projectId: string) {
   });
 }
 
-function NewTaskForm({ project, groups, onDone }: { project: Project; groups: StatusGroup[]; onDone: () => void }) {
+function NewTaskForm({ project, groups, sections, onDone }: { project: Project; groups: StatusGroup[]; sections: string[]; onDone: () => void }) {
   const { user } = useSession();
   const qc = useQueryClient();
   const [title, setTitle] = useState('');
+  const [section, setSection] = useState('');
   const [statusKey, setStatusKey] = useState(groups[0]?.key ?? '');
   const create = useMutation({
     mutationFn: () =>
       createTask({
         project_id: project.id,
         client_id: project.client_id,
-        description: title.trim(),
+        description: title.trim() + (section ? `\nSection: ${section}` : ''),
         assigned_user_id: user.id,
         status_id: groups.find((g) => g.key === statusKey)?.primaryId,
       }),
@@ -135,6 +125,7 @@ function NewTaskForm({ project, groups, onDone }: { project: Project; groups: St
           </option>
         ))}
       </select>
+      <select aria-label="Task section" value={section} onChange={e => setSection(e.target.value)}><option value="">No section</option>{sections.map(name => <option key={name} value={name}>{name}</option>)}</select>
       <button type="submit" className="btn" disabled={create.isPending || !title.trim()}>
         {create.isPending ? 'Creating…' : 'Create task'}
       </button>
@@ -145,7 +136,11 @@ function NewTaskForm({ project, groups, onDone }: { project: Project; groups: St
   );
 }
 
-function TaskCard({
+function SectionSelect({ item, sections, onChange }: { item: WorkItem; sections: string[]; onChange(item: WorkItem, section: string): void }) {
+  return <select aria-label={`Section of ${item.title}`} value={item.section} onChange={e => onChange(item, e.target.value)}><option value="">No section</option>{[...new Set([...sections, item.section].filter(Boolean))].map(section => <option key={section} value={section}>{section}</option>)}</select>;
+}
+
+export function TaskCard({
   item,
   groups,
   nameOf,
@@ -153,6 +148,7 @@ function TaskCard({
   dragging,
   onDragStart,
   onDragEnd,
+  projectName, sections, onSection,
 }: {
   item: WorkItem;
   groups: StatusGroup[];
@@ -161,6 +157,7 @@ function TaskCard({
   dragging: boolean;
   onDragStart: (item: WorkItem, e: DragEvent) => void;
   onDragEnd: () => void;
+  projectName?: string; sections?: string[]; onSection?: (item: WorkItem, section: string) => void;
 }) {
   const { timezone } = useSession();
   const timer = useTimer();
@@ -174,11 +171,12 @@ function TaskCard({
       onDragStart={(e) => onDragStart(item, e)}
       onDragEnd={onDragEnd}
       onClick={(e) => {
-        if (!(e.target as HTMLElement).closest('a, button, input, select')) window.location.hash = taskHref(item.rep.id);
+        if (!(e.target as HTMLElement).closest('a, button, input, select')) navigate(taskHref(item.rep.id));
       }}
     >
       <div className="t">
         <a className="task-open" href={taskHref(item.rep.id)}>{item.title}</a>
+        {projectName && <span className="section">{projectName}</span>}
         {item.section && <span className="section">{item.section}</span>}
       </div>
       <div className="m">
@@ -186,27 +184,29 @@ function TaskCard({
         <span className="num">{fmtH(hoursOf(item.seconds))} h</span>
         <span>· {ago(item.last, timezone)}</span>
         <StatusMenu title={item.title} groups={groups} current={groupOf(groups, item.statusId)} onSelect={(g) => onMove(item, g)} />
+        {onSection && <SectionSelect item={item} sections={sections ?? []} onChange={onSection} />}
         <PlayButton title={item.title} on={on} disabled={timer.busy} onClick={() => void timer.toggleItem(item)} />
       </div>
     </article>
   );
 }
 
-function TaskTable({
+export function TaskTable({
   columns,
   nameOf,
   groups,
-  onMove,
+  onMove, projectNames, sections, onSection,
 }: {
   columns: { group: StatusGroup; items: WorkItem[] }[];
+  projectNames?: Map<string, string>; sections?: string[]; onSection?: (item: WorkItem, section: string) => void;
   nameOf: (id: string) => string;
   groups: StatusGroup[];
   onMove: (item: WorkItem, target: StatusGroup) => void;
 }) {
   const { timezone } = useSession();
   const timer = useTimer();
-  const rows = columns.flatMap(({ group, items }) =>
-    [...items].sort((a, b) => b.last - a.last).map((item) => ({ group, item })),
+  const rows = columns.flatMap(({ items }) =>
+    [...items].sort((a, b) => b.last - a.last).map((item) => ({ group: groupOf(groups, item.statusId), item })),
   );
   return (
     <table className="list">
@@ -234,12 +234,13 @@ function TaskTable({
           <tr key={item.key}>
             <td>
               <div className="t-name"><a className="task-open" href={taskHref(item.rep.id)}>{item.title}</a></div>
-              {item.section && <div className="t-sub">{item.section}</div>}
+              {projectNames?.get(item.projectId) && <div className="t-sub">{projectNames.get(item.projectId)}</div>}
+              {onSection ? <SectionSelect item={item} sections={sections ?? []} onChange={onSection} /> : item.section && <div className="t-sub">{item.section}</div>}
             </td>
             <td>
               <span className="pill">
                 <StatusMenu title={item.title} groups={groups} current={group} onSelect={(g) => onMove(item, g)} />
-                {group.label}
+                {group?.label ?? 'Unspecified'}
               </span>
             </td>
             <td>
@@ -262,42 +263,35 @@ function TaskTable({
 
 export function ProjectBoard({ project, groups }: { project: Project; groups: StatusGroup[] }) {
   const clients = useClientMap();
-  const [view, setViewState] = useState<BoardView>(readView);
-  const setView = (v: BoardView) => {
-    setViewState(v);
-    try {
-      window.localStorage.setItem(VIEW_KEY, v);
-    } catch {
-      /* ignore */
-    }
-  };
+  const { view, setView } = useTaskLayout();
+  const { columns: columnMode, setColumns } = useTaskColumns();
+  const workflow = useProjectWorkflow(project.id);
+  const sections = workflow.data?.sections ?? [];
+  const [filters, setFilters] = useState({ ...emptyTaskFilters });
   const [doneLimit, setDoneLimit] = useState(DONE_PAGE_SIZE);
   const [creating, setCreating] = useState(false);
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
 
-  const data = useProjectTasks(project.id, groups, doneLimit);
+  const search = useDebounced(filters.search);
+  const data = useProjectTasks(project.id, groups, doneLimit, search);
   const nameOf = usePeople(data.tasks);
   const counts = useProjectCounts(project.id, groups);
   const move = useMoveItem(project.id);
 
-  const items = useMemo(() => groupWorkItems(data.tasks), [data.tasks]);
-  const columns = useMemo(
-    () =>
-      groups.map((group) => ({
-        group,
-        items: sortForColumn(items.filter((i) => group.statusIds.includes(i.statusId))),
-      })),
-    [groups, items],
-  );
+  const allItems = useMemo(() => groupWorkItems(data.tasks), [data.tasks]);
+  const items = useMemo(() => filterWorkItems(allItems, filters), [allItems, filters]);
+  const columns = taskColumns(items, groups, columnMode, sections).map(column => ({ ...column, items: sortForColumn(column.items) }));
+  const qc = useQueryClient();
+  const sectionMove = useMutation({ mutationFn: ({ item, section }: { item: WorkItem; section: string }) => setTaskWorkflow(item.rep.id, { section }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['tasks'] }); }, onError: error => notify(errorMessage(error)) });
+  const changeSection = (item: WorkItem, section: string) => sectionMove.mutate({ item, section });
 
   const openTasks = groups.filter((g) => !g.isDone).reduce((sum, g) => sum + (counts[g.key] ?? 0), 0);
   const client = clientName(clients.get(project.client_id));
 
   const moveTo = (item: WorkItem, target: StatusGroup, index = 0) => {
-    const column = columns.find((c) => c.group.key === target.key);
-    if (!column) return;
-    move.mutate(planMove(column.items, item, target, index));
+    move.mutate(planMove(items.filter(i => target.statusIds.includes(i.statusId)), item, target, index));
   };
 
   const onDrop = (target: StatusGroup, e: DragEvent) => {
@@ -307,6 +301,7 @@ export function ProjectBoard({ project, groups }: { project: Project; groups: St
     setDragKey(null);
     const item = items.find((i) => i.key === key);
     if (!item) return;
+    if (columnMode === 'section') { if (item.section !== target.primaryId) changeSection(item, target.primaryId); return; }
     const column = columns.find((c) => c.group.key === target.key);
     if (!column) return;
     const beforeEl = (e.target as HTMLElement).closest?.('[data-key]');
@@ -331,22 +326,14 @@ export function ProjectBoard({ project, groups }: { project: Project; groups: St
           </p>
         </div>
         <div className="board-tools">
-          <Seg
-            label="Task layout"
-            value={view}
-            onChange={setView}
-            options={[
-              { value: 'board', label: 'Board' },
-              { value: 'list', label: 'List' },
-            ]}
-          />
           <button type="button" className="btn" onClick={() => setCreating(true)} aria-expanded={creating}>
             New task
           </button>
         </div>
       </div>
 
-      {creating && <NewTaskForm project={project} groups={groups} onDone={() => setCreating(false)} />}
+      <TaskFilters value={filters} onChange={setFilters} groups={groups} items={allItems} nameOf={nameOf} view={view} onView={setView} columns={columnMode} onColumns={setColumns} />
+      {creating && <NewTaskForm project={project} groups={groups} sections={sections} onDone={() => setCreating(false)} />}
 
       {data.isError && <p className="sub" role="alert">The tasks for this project could not be loaded.</p>}
       {data.isPending ? (
@@ -355,7 +342,7 @@ export function ProjectBoard({ project, groups }: { project: Project; groups: St
         </p>
       ) : view === 'board' ? (
         <div className="board-scroll">
-          <div className="board" style={{ gridTemplateColumns: `repeat(${Math.max(groups.length, 1)}, minmax(220px, 1fr))`, minWidth: `${groups.length * 230}px` }}>
+          <div className="board" style={{ gridTemplateColumns: `repeat(${Math.max(columns.length, 1)}, minmax(220px, 1fr))`, minWidth: `${columns.length * 230}px` }}>
             {columns.map(({ group, items: colItems }) => (
               <div
                 key={group.key}
@@ -385,6 +372,7 @@ export function ProjectBoard({ project, groups }: { project: Project; groups: St
                     groups={groups}
                     nameOf={nameOf}
                     onMove={(it, g) => moveTo(it, g, 0)}
+                    sections={sections} onSection={changeSection}
                     dragging={dragKey === item.key}
                     onDragStart={(it, e) => {
                       setDragKey(it.key);
@@ -416,7 +404,7 @@ export function ProjectBoard({ project, groups }: { project: Project; groups: St
         </div>
       ) : (
         <div className="table-scroll">
-          <TaskTable columns={columns} nameOf={nameOf} groups={groups} onMove={(it, g) => moveTo(it, g, 0)} />
+          <TaskTable columns={columns} sections={sections} onSection={changeSection} nameOf={nameOf} groups={groups} onMove={(it, g) => moveTo(it, g, 0)} />
           {data.doneLoaded < data.doneTotal && (
             <div className="more">
               <button type="button" disabled={data.isFetchingDone} onClick={() => setDoneLimit((n) => n + DONE_PAGE_SIZE)}>
@@ -426,6 +414,7 @@ export function ProjectBoard({ project, groups }: { project: Project; groups: St
           )}
         </div>
       )}
+      {view === 'board' && columnMode === 'section' && data.doneLoaded < data.doneTotal && <button type="button" className="more-btn" disabled={data.isFetchingDone} onClick={() => setDoneLimit(n => n + DONE_PAGE_SIZE)}>Show more completed tasks in sections</button>}
       <p className="hidden-note">
         A card is one piece of work: everyone's copies of a task with the same title, with each person's time on their own
         copy. Drag cards between columns or use the status button on a card; moving a card moves every copy.

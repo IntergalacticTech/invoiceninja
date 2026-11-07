@@ -26,6 +26,7 @@ export interface User {
   first_name: string;
   last_name: string;
   email: string;
+  avatar_url?: string;
   is_deleted?: boolean;
   archived_at?: number;
 }
@@ -75,6 +76,7 @@ export interface Client {
 }
 
 export interface TaskStatus {
+  is_done?: boolean;
   id: string;
   name: string;
   color: string;

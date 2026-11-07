@@ -14,8 +14,8 @@ describe('sign-in', () => {
     const result = await handleOAuthCallback();
     expect(result).toEqual({ handled: true });
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe('tok-sam');
-    expect(window.location.pathname).toBe('/team/');
-    expect(window.location.hash).toBe('#/projects');
+    expect(window.location.pathname).toBe('/projects');
+    expect(window.location.hash).toBe('');
     expect(window.location.href).not.toContain('code=');
   });
 
@@ -28,12 +28,14 @@ describe('sign-in', () => {
 });
 
 describe('session and admin link', () => {
-  it('team member: no Admin, Expenses or Clients links', async () => {
+  it('team member: internal Expenses and no Admin, Clients or Reports links', async () => {
     renderApp({ as: 'u_sam' });
     expect(await screen.findByText(/Sam Larimore · team member/)).toBeInTheDocument();
     const nav = screen.getByRole('navigation', { name: 'Main' });
     expect(within(nav).queryByText(/Admin/)).toBeNull();
-    expect(within(nav).queryByText('Expenses')).toBeNull();
+    expect(within(nav).getByText('Expenses')).toHaveAttribute('href', '/expenses');
+    expect(within(nav).queryByText('Clients')).toBeNull();
+    expect(within(nav).queryByText('Reports')).toBeNull();
   });
 
   it('admin: Admin link opens the handoff URL in a new tab, or this tab if blocked', async () => {

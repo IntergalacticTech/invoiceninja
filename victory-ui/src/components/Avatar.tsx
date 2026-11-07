@@ -1,6 +1,9 @@
+import { useState } from 'react';
 import { hue, initials } from '../domain/people';
 
-export function Avatar({ name }: { name: string }) {
+export function Avatar({ name, src }: { name: string; src?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (src && !failed) return <img className="av" src={src} alt={name} referrerPolicy="no-referrer" onError={() => setFailed(true)} />;
   return (
     <span className="av" title={name} aria-label={name} role="img" style={{ background: `hsl(${hue(name)} 45% 42%)` }}>
       {initials(name)}

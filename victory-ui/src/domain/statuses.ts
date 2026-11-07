@@ -2,15 +2,6 @@ import type { TaskStatus } from '../api/types';
 
 export type Canonical = 'backlog' | 'ready' | 'progress' | 'done';
 
-const CANONICAL_ORDER: Canonical[] = ['backlog', 'ready', 'progress', 'done'];
-
-const LABEL: Record<Canonical, string> = {
-  backlog: 'Backlog',
-  ready: 'Ready',
-  progress: 'In progress',
-  done: 'Done',
-};
-
 /** Display aliases, case-insensitive. "Ready to do" is shown as "Ready" (display only). */
 const ALIASES: Record<string, Canonical> = {
   backlog: 'backlog',
@@ -48,31 +39,15 @@ export function buildStatusGroups(statuses: TaskStatus[]): StatusGroup[] {
   const live = statuses.filter((s) => !s.is_deleted && !s.archived_at).sort(byOrder);
   const groups: StatusGroup[] = [];
 
-  for (const canonical of CANONICAL_ORDER) {
-    const members = live.filter((s) => canonicalOf(s.name) === canonical);
-    const first = members[0];
-    if (!first) continue;
+  const usedKeys = new Set<string>();
+  for (const status of live) {
+    const canonical = canonicalOf(status.name);
+    const key = canonical && !usedKeys.has(canonical) ? canonical : `status-${status.id}`;
+    usedKeys.add(key);
     groups.push({
-      key: canonical,
-      label: LABEL[canonical],
-      canonical,
-      statusIds: members.map((s) => s.id),
-      primaryId: first.id,
-      color: `var(--st-${canonical})`,
-      isDone: canonical === 'done',
-    });
-  }
-
-  for (const s of live) {
-    if (canonicalOf(s.name)) continue;
-    groups.push({
-      key: `status-${s.id}`,
-      label: s.name,
-      canonical: null,
-      statusIds: [s.id],
-      primaryId: s.id,
-      color: /^#[0-9a-f]{3,8}$/i.test(s.color) ? s.color : 'var(--st-backlog)',
-      isDone: false,
+      key, label: status.name, canonical, statusIds: [status.id], primaryId: status.id,
+      color: /^#[0-9a-f]{3,8}$/i.test(status.color) ? status.color : canonical ? `var(--st-${canonical})` : 'var(--st-backlog)',
+      isDone: status.is_done ?? (canonical === 'done' || ['complete', 'completed', 'delivered', 'hired', 'not moving forward'].includes(status.name.trim().toLowerCase())),
     });
   }
   return groups;
