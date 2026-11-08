@@ -59,7 +59,10 @@ class WorkspaceProjectController extends Controller
         $client = Client::where('company_id', $user->companyId())->where('is_deleted', false)
             ->find($this->decodePrimaryKey($data['client_id']));
         abort_unless($client, 404, 'The active client is unavailable.');
-        $result = WorkspaceCommands::run($data['request_id'], 'delivery_create_project', $data, function () use ($data, $user, $client) {
+        $result = WorkspaceCommands::runAuthorized($data['request_id'], 'delivery_create_project', $data,
+            fn () => WorkspaceCommands::lockCurrentActor(true), function () use ($data, $user, $client) {
+            WorkspaceCommands::lockCurrentActor(true);
+            abort_unless($user->can('create', Project::class), 403);
             $body = $this->body($data);
             $body['client_id'] = $client->id;
             $project = app(ProjectRepository::class)->save($body, ProjectFactory::create($user->companyId(), $user->id));
@@ -76,8 +79,11 @@ class WorkspaceProjectController extends Controller
         $current = Project::where('company_id', $user->companyId())->where('is_deleted', false)->findOrFail($this->decodePrimaryKey($project));
         abort_unless($user->can('edit', $current), 403);
         $data = $this->input($request, false);
-        $result = WorkspaceCommands::run($data['request_id'], 'delivery_update_project:' . $project, $data, function () use ($data, $current) {
+        $result = WorkspaceCommands::runAuthorized($data['request_id'], 'delivery_update_project:' . $project, $data,
+            fn () => WorkspaceCommands::lockCurrentActor(true), function () use ($data, $current, $user) {
+            WorkspaceCommands::lockCurrentActor(true);
             $fresh = Project::where('company_id', $current->company_id)->lockForUpdate()->findOrFail($current->id);
+            abort_unless($user->can('edit', $fresh), 403);
             abort_if($fresh->is_deleted, 404);
             abort_unless((int) $fresh->updated_at === $data['expected_updated_at'], 409, 'This project changed. Refresh before editing.');
             $updated = app(ProjectRepository::class)->save($this->body($data), $fresh);
@@ -96,8 +102,11 @@ class WorkspaceProjectController extends Controller
             'expected_updated_at' => ['required', 'integer', 'min:0']]);
         $current = Project::withTrashed()->where('company_id', $user->companyId())->where('is_deleted', false)->findOrFail($this->decodePrimaryKey($project));
         abort_unless($user->can('edit', $current), 403);
-        $result = WorkspaceCommands::run($data['request_id'], 'delivery_archive_project:' . $project, $data, function () use ($data, $current) {
+        $result = WorkspaceCommands::runAuthorized($data['request_id'], 'delivery_archive_project:' . $project, $data,
+            fn () => WorkspaceCommands::lockCurrentActor(true), function () use ($data, $current, $user) {
+            WorkspaceCommands::lockCurrentActor(true);
             $fresh = Project::withTrashed()->where('company_id', $current->company_id)->lockForUpdate()->findOrFail($current->id);
+            abort_unless($user->can('edit', $fresh), 403);
             abort_if($fresh->is_deleted, 404);
             abort_unless((int) $fresh->updated_at === $data['expected_updated_at'], 409, 'This project changed. Refresh before editing.');
             if ($data['action'] === 'archive' && !$fresh->trashed()) $fresh->delete();

@@ -52,6 +52,142 @@ class ProjectAccessTest extends TestCase
             ->assertOk();
     }
 
+    /** Preserve the ingress token's cached role while changing current SQL state. */
+    private function changeActorAfterReceiptStarts(array $changes, bool $deleteUser = false, bool $viewer = false): void
+    {
+        $changed = false;
+        DB::connection()->beforeExecuting(function ($query) use (&$changed, $changes, $deleteUser, $viewer) {
+            if ($changed || !str_starts_with(strtolower(ltrim($query)), 'insert')
+                || !str_contains($query, 'victory_workspace_commands')) return;
+            $changed = true;
+            if ($changes) DB::table('company_user')->where('company_id', $this->company->id)->where('user_id', $this->user->id)->update($changes);
+            if ($deleteUser) DB::table('users')->where('id', $this->user->id)->update(['is_deleted' => true]);
+            if ($viewer) DB::table('victory_project_access')->insert(['company_id' => $this->company->id,
+                'user_id' => $this->user->id, 'project_id' => $this->project->id, 'role' => 'viewer',
+                'created_at' => now(), 'updated_at' => now()]);
+        });
+    }
+
+    public function test_project_create_rechecks_actor_demotion_after_the_outer_policy_check(): void
+    {
+        $before = Project::where('company_id', $this->company->id)->count();
+        $request = (string) Str::uuid();
+        $this->changeActorAfterReceiptStarts(['is_admin' => false, 'is_owner' => false]);
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->postJson('/api/v1/victory/projects',
+            ['request_id' => $request, 'client_id' => $this->client->hashed_id, 'name' => 'Must not be created'])->assertForbidden();
+        $this->assertSame($before, Project::where('company_id', $this->company->id)->count());
+        $this->assertSame(0, DB::table('victory_workspace_commands')->where('request_id', $request)->count());
+    }
+
+    public function test_project_update_and_archive_recheck_current_admin_inside_receipt_work(): void
+    {
+        $before = $this->project->fresh();
+        $path = '/api/v1/victory/projects/' . $this->project->hashed_id;
+        $this->changeActorAfterReceiptStarts(['is_admin' => false, 'is_owner' => false]);
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->putJson($path,
+            ['request_id' => (string) Str::uuid(), 'expected_updated_at' => (int) $before->updated_at, 'name' => 'Must not change'])->assertForbidden();
+        $this->assertSame($before->name, $this->project->fresh()->name);
+        // The failed receipt's transaction rolls the test-only demotion back.
+        $this->changeActorAfterReceiptStarts(['is_admin' => false, 'is_owner' => false]);
+        $this->postJson($path . '/archive', ['request_id' => (string) Str::uuid(),
+            'expected_updated_at' => (int) $before->updated_at, 'action' => 'archive'])->assertForbidden();
+        $this->assertFalse($this->project->fresh()->trashed());
+        $this->assertEquals($before->task_rate, $this->project->fresh()->task_rate);
+    }
+
+    public function test_grant_replacement_rechecks_current_actor_before_changing_another_member(): void
+    {
+        $request = (string) Str::uuid();
+        $before = DB::table('victory_access_audit')->where('company_id', $this->company->id)->count();
+        $this->changeActorAfterReceiptStarts(['is_admin' => false, 'is_owner' => false]);
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->putJson('/api/v1/victory/access/users/' . $this->member->hashed_id . '/grants',
+            ['request_id' => $request, 'expected_projects' => [], 'projects' => [
+                ['project_id' => $this->project->hashed_id, 'role' => 'manager'],
+            ]])->assertForbidden();
+        $this->assertSame(0, DB::table('victory_project_access')->where('company_id', $this->company->id)->where('user_id', $this->member->id)->count());
+        $this->assertSame($before, DB::table('victory_access_audit')->where('company_id', $this->company->id)->count());
+        $this->assertSame(0, DB::table('victory_workspace_commands')->where('request_id', $request)->count());
+    }
+
+    public function test_timer_creation_rechecks_native_task_create_permission_after_waiting(): void
+    {
+        $before = Task::where('company_id', $this->company->id)->count();
+        $this->changeActorAfterReceiptStarts(['is_admin' => false, 'is_owner' => false, 'permissions' => '']);
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->postJson('/api/v1/victory/workspace/timer-create',
+            ['request_id' => (string) Str::uuid(), 'project_id' => $this->project->hashed_id,
+                'description' => 'Must not start'])->assertForbidden();
+        $this->assertSame($before, Task::where('company_id', $this->company->id)->count());
+    }
+
+    public function test_demoted_timer_creator_needs_current_project_contribution_not_only_native_create(): void
+    {
+        $before = Task::where('company_id', $this->company->id)->count();
+        $this->changeActorAfterReceiptStarts(['is_admin' => false, 'is_owner' => false, 'permissions' => 'create_task'], viewer: true);
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->postJson('/api/v1/victory/workspace/timer-create',
+            ['request_id' => (string) Str::uuid(), 'project_id' => $this->project->hashed_id,
+                'description' => 'Viewer must not start'])->assertForbidden();
+        $this->assertSame($before, Task::where('company_id', $this->company->id)->count());
+    }
+
+    public function test_project_command_rechecks_locked_membership_and_deleted_actor(): void
+    {
+        $body = ['request_id' => (string) Str::uuid(), 'client_id' => $this->client->hashed_id, 'name' => 'Must not create'];
+        $this->changeActorAfterReceiptStarts(['is_locked' => true]);
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->postJson('/api/v1/victory/projects', $body)->assertForbidden();
+        $this->changeActorAfterReceiptStarts([], deleteUser: true);
+        $this->postJson('/api/v1/victory/projects', [...$body, 'request_id' => (string) Str::uuid()])->assertForbidden();
+    }
+
+    private function cacheActorThenDemote(): void
+    {
+        $token = CompanyToken::with(['cu', 'user'])->where('token', $this->token)->firstOrFail();
+        $actor = $token->user;
+        $actor->setCompany($this->company);
+        auth()->setUser($actor);
+        app(\App\Utils\TruthSource::class)->setUser($actor)->setCompany($this->company)
+            ->setCompanyUser($token->cu)->setCompanyToken($token);
+        $this->assertTrue($actor->isSuperUser());
+        DB::table('company_user')->where('company_id', $this->company->id)->where('user_id', $actor->id)
+            ->update(['is_admin' => false, 'is_owner' => false, 'permissions' => '']);
+        // This is exactly the stale request-local relation seen after a wait.
+        $this->assertTrue($actor->isSuperUser());
+    }
+
+    public function test_cached_project_receipt_is_not_a_permission_grant_after_demotion(): void
+    {
+        $body = ['request_id' => (string) Str::uuid(), 'expected_updated_at' => (int) $this->project->updated_at,
+            'name' => 'Applied before demotion'];
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->putJson('/api/v1/victory/projects/' . $this->project->hashed_id, $body)->assertOk();
+        $this->cacheActorThenDemote();
+        try {
+            app(\App\Http\Controllers\Victory\WorkspaceProjectController::class)->update(
+                \Illuminate\Http\Request::create('/api/v1/victory/projects/' . $this->project->hashed_id, 'PUT', $body), $this->project->hashed_id);
+            $this->fail('A cached receipt cannot authorize a demoted administrator.');
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $denied) {
+            $this->assertSame(403, $denied->getStatusCode());
+        }
+        $this->assertSame('Applied before demotion', $this->project->fresh()->name);
+        $this->assertSame(1, DB::table('victory_workspace_commands')->where('request_id', $body['request_id'])->count());
+    }
+
+    public function test_cached_timer_receipt_rechecks_current_native_task_permission(): void
+    {
+        $body = ['request_id' => (string) Str::uuid(), 'project_id' => $this->project->hashed_id, 'description' => 'Applied owned timer'];
+        $id = $this->withHeaders(['X-API-TOKEN' => $this->token])->postJson('/api/v1/victory/workspace/timer-create', $body)->assertCreated()->json('data.id');
+        $task = Task::findOrFail($this->decodePrimaryKey($id));
+        $before = $task->time_log;
+        $this->cacheActorThenDemote();
+        try {
+            app(\App\Http\Controllers\Victory\WorkspaceTimerController::class)->createAndStart(
+                \Illuminate\Http\Request::create('/api/v1/victory/workspace/timer-create', 'POST', $body));
+            $this->fail('A cached timer receipt cannot authorize revoked native create permission.');
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $denied) {
+            $this->assertSame(403, $denied->getStatusCode());
+        }
+        $this->assertSame($before, $task->fresh()->time_log);
+        $this->assertSame(1, DB::table('victory_workspace_commands')->where('request_id', $body['request_id'])->count());
+    }
+
     public function test_native_project_creation_is_idempotent_and_keeps_financial_defaults(): void
     {
         $body = ['request_id' => (string) Str::uuid(), 'client_id' => $this->client->hashed_id,
