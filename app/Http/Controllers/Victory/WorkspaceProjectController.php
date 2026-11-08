@@ -57,7 +57,8 @@ class WorkspaceProjectController extends Controller
         abort_unless($user->isSuperUser() && $user->can('create', Project::class), 403);
         $data = $this->input($request, true);
         $client = Client::where('company_id', $user->companyId())->where('is_deleted', false)
-            ->findOrFail($this->decodePrimaryKey($data['client_id']));
+            ->find($this->decodePrimaryKey($data['client_id']));
+        abort_unless($client, 404, 'The active client is unavailable.');
         $result = WorkspaceCommands::run($data['request_id'], 'delivery_create_project', $data, function () use ($data, $user, $client) {
             $body = $this->body($data);
             $body['client_id'] = $client->id;
