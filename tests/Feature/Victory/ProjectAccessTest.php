@@ -116,7 +116,7 @@ class ProjectAccessTest extends TestCase
     {
         $this->withHeaders(['X-API-TOKEN' => $this->token]);
         $path = '/api/v1/victory/projects/' . $this->project->hashed_id;
-        $money = $this->project->task_rate;
+        $money = $this->project->fresh()->task_rate;
         $this->putJson($path, ['request_id' => (string) Str::uuid(), 'expected_updated_at' => 0, 'name' => 'Stale'])->assertConflict();
         $update = ['request_id' => (string) Str::uuid(), 'expected_updated_at' => (int) $this->project->fresh()->updated_at, 'name' => 'Current name'];
         $this->putJson($path, $update)->assertOk();
