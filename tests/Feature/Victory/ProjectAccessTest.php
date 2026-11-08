@@ -52,6 +52,140 @@ class ProjectAccessTest extends TestCase
             ->assertOk();
     }
 
+    public function test_native_project_creation_is_idempotent_and_keeps_financial_defaults(): void
+    {
+        $body = ['request_id' => (string) Str::uuid(), 'client_id' => $this->client->hashed_id,
+            'name' => 'QA receipt-protected project', 'budgeted_hours' => 12.5, 'private_notes' => '# Scope'];
+        $before = Project::where('company_id', $this->company->id)->count();
+        $this->withHeaders(['X-API-TOKEN' => $this->token]);
+        $id = $this->postJson('/api/v1/victory/projects', $body)->assertCreated()->json('data.id');
+        $this->postJson('/api/v1/victory/projects', $body)->assertCreated()->assertJsonPath('data.id', $id);
+        $this->assertSame($before + 1, Project::where('company_id', $this->company->id)->count());
+        $project = Project::findOrFail($this->decodePrimaryKey($id));
+        $this->assertSame($this->client->id, $project->client_id);
+        $this->assertSame($this->user->id, $project->user_id);
+        $this->assertEquals(0, $project->task_rate);
+        $this->assertEquals(12.5, $project->budgeted_hours);
+        $this->postJson('/api/v1/victory/projects', [...$body, 'name' => 'Changed request'])->assertConflict();
+        $this->postJson('/api/v1/victory/projects', [...$body, 'request_id' => (string) Str::uuid(), 'task_rate' => 123])->assertUnprocessable();
+    }
+
+    public function test_native_company_role_changes_are_current_state_checked_and_preserve_grants(): void
+    {
+        $this->grant('viewer');
+        $path = '/api/v1/victory/access/users/' . $this->member->hashed_id . '/role';
+        $body = ['request_id' => (string) Str::uuid(), 'expected_role' => 'member', 'role' => 'admin'];
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->putJson($path, $body)->assertOk()->assertJsonPath('data.role', 'admin');
+        $this->putJson($path, $body)->assertOk();
+        $this->assertTrue((bool) \App\Models\CompanyUser::where('user_id', $this->member->id)->where('company_id', $this->company->id)->value('is_admin'));
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->getJson('/api/v1/victory/access/users')->assertOk();
+        $this->withHeaders(['X-API-TOKEN' => $this->token]);
+        $this->putJson($path, ['request_id' => (string) Str::uuid(), 'expected_role' => 'member', 'role' => 'member'])->assertConflict();
+        $this->putJson($path, ['request_id' => (string) Str::uuid(), 'expected_role' => 'admin', 'role' => 'member'])->assertOk();
+        $this->assertSame('viewer', DB::table('victory_project_access')->where('user_id', $this->member->id)->where('project_id', $this->project->id)->value('role'));
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->getJson('/api/v1/victory/access/users')->assertForbidden();
+    }
+
+    public function test_company_role_endpoint_cannot_change_self_owner_or_cross_company_user(): void
+    {
+        $body = ['request_id' => (string) Str::uuid(), 'expected_role' => 'admin', 'role' => 'member'];
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->putJson('/api/v1/victory/access/users/' . $this->user->hashed_id . '/role', $body)->assertConflict();
+        $this->putJson('/api/v1/victory/access/users/' . $this->member->hashed_id . '/role', [...$body, 'is_owner' => true])->assertUnprocessable();
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->putJson('/api/v1/victory/access/users/' . $this->user->hashed_id . '/role', $body)->assertForbidden();
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->putJson('/api/v1/victory/access/users/' . $this->encodePrimaryKey(999999999) . '/role', $body)->assertNotFound();
+        // Give a second administrator authority to prove the owner protection,
+        // independently of the self-change guard.
+        \App\Models\CompanyUser::where('company_id', $this->company->id)->where('user_id', $this->member->id)->update(['is_admin' => true]);
+        \App\Models\CompanyUser::where('company_id', $this->company->id)->where('user_id', $this->user->id)->update(['is_owner' => true]);
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->putJson('/api/v1/victory/access/users/' . $this->user->hashed_id . '/role', $body)->assertConflict();
+    }
+
+    public function test_new_timer_task_starts_atomically_and_replay_never_duplicates_time(): void
+    {
+        $this->grant();
+        $body = ['request_id' => (string) Str::uuid(), 'project_id' => $this->project->hashed_id, 'description' => 'New timer work'];
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken]);
+        $id = $this->postJson('/api/v1/victory/workspace/timer-create', $body)->assertCreated()->json('data.id');
+        $task = Task::findOrFail($this->decodePrimaryKey($id));
+        $before = $task->time_log;
+        $this->assertTrue((bool) $task->is_running);
+        $this->assertSame($this->member->id, $task->assigned_user_id);
+        $this->postJson('/api/v1/victory/workspace/timer-create', $body)->assertCreated()->assertJsonPath('data.id', $id);
+        $this->assertSame($before, $task->fresh()->time_log);
+        $count = Task::where('company_id', $this->company->id)->count();
+        $this->postJson('/api/v1/victory/workspace/timer-create', [...$body, 'request_id' => (string) Str::uuid(), 'description' => 'Competing timer'])->assertConflict();
+        $this->assertSame($count, Task::where('company_id', $this->company->id)->count());
+        $this->assertSame($before, $task->fresh()->time_log);
+    }
+
+    public function test_create_and_start_timer_preserves_viewer_and_project_boundaries(): void
+    {
+        $this->grant('viewer');
+        $body = ['request_id' => (string) Str::uuid(), 'project_id' => $this->project->hashed_id, 'description' => 'Denied timer'];
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->postJson('/api/v1/victory/workspace/timer-create', $body)->assertForbidden();
+        $this->grant('contributor');
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->postJson('/api/v1/victory/workspace/timer-create', [...$body, 'assigned_user_id' => $this->user->hashed_id])->assertForbidden();
+        $other = Project::factory()->create(['company_id' => $this->company->id, 'client_id' => $this->client->id, 'user_id' => $this->user->id]);
+        $this->postJson('/api/v1/victory/workspace/timer-create', [...$body, 'project_id' => $other->hashed_id])->assertForbidden();
+    }
+
+    public function test_new_project_operations_keep_source_administrator_and_company_boundaries(): void
+    {
+        $this->grant('manager');
+        $body = ['request_id' => (string) Str::uuid(), 'client_id' => $this->client->hashed_id, 'name' => 'Denied'];
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->postJson('/api/v1/victory/projects', $body)->assertForbidden();
+        $this->putJson('/api/v1/victory/projects/' . $this->project->hashed_id, ['request_id' => (string) Str::uuid(), 'expected_updated_at' => (int) $this->project->updated_at, 'name' => 'Denied'])->assertForbidden();
+        $this->postJson('/api/v1/victory/projects/' . $this->project->hashed_id . '/archive', ['request_id' => (string) Str::uuid(), 'expected_updated_at' => (int) $this->project->updated_at, 'action' => 'archive'])->assertForbidden();
+        $missing = $this->encodePrimaryKey(999999999);
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->postJson('/api/v1/victory/projects', [...$body, 'client_id' => $missing])->assertNotFound();
+        $this->postJson('/api/v1/victory/projects', [...$body, 'assigned_user_id' => $missing])->assertUnprocessable();
+        $this->assertNotSame('Denied', $this->project->fresh()->name);
+    }
+
+    public function test_project_update_conflict_and_recoverable_archive_preserve_time_and_money(): void
+    {
+        $this->withHeaders(['X-API-TOKEN' => $this->token]);
+        $path = '/api/v1/victory/projects/' . $this->project->hashed_id;
+        $money = $this->project->fresh()->task_rate;
+        $this->putJson($path, ['request_id' => (string) Str::uuid(), 'expected_updated_at' => 0, 'name' => 'Stale'])->assertConflict();
+        $update = ['request_id' => (string) Str::uuid(), 'expected_updated_at' => (int) $this->project->fresh()->updated_at, 'name' => 'Current name'];
+        $this->putJson($path, $update)->assertOk();
+        $this->putJson($path, $update)->assertOk();
+        $archive = ['request_id' => (string) Str::uuid(), 'expected_updated_at' => (int) $this->project->fresh()->updated_at, 'action' => 'archive'];
+        $this->postJson($path . '/archive', $archive)->assertOk()->assertJsonPath('data.archived', true);
+        $this->postJson($path . '/archive', $archive)->assertOk();
+        $restore = ['request_id' => (string) Str::uuid(), 'expected_updated_at' => (int) $this->project->fresh()->updated_at, 'action' => 'restore'];
+        $this->postJson($path . '/archive', $restore)->assertOk()->assertJsonPath('data.archived', false);
+        $this->assertSame('Current name', $this->project->fresh()->name);
+        $this->assertEquals($money, $this->project->fresh()->task_rate);
+        $this->assertFalse((bool) $this->project->fresh()->is_deleted);
+    }
+
+    public function test_source_grants_compare_current_state_and_replay_one_audited_replacement(): void
+    {
+        $this->withHeaders(['X-API-TOKEN' => $this->token]);
+        $path = '/api/v1/victory/access/users/' . $this->member->hashed_id . '/grants';
+        $body = ['request_id' => (string) Str::uuid(), 'expected_projects' => [],
+            'projects' => [['project_id' => $this->project->hashed_id, 'role' => 'viewer']]];
+        $before = DB::table('victory_access_audit')->where('company_id', $this->company->id)->count();
+        $this->putJson($path, $body)->assertOk()->assertJsonPath('data.applied', true);
+        $this->putJson($path, $body)->assertOk();
+        $this->assertSame($before + 1, DB::table('victory_access_audit')->where('company_id', $this->company->id)->count());
+        $this->putJson($path, [...$body, 'request_id' => (string) Str::uuid(), 'projects' => []])->assertConflict();
+        $this->assertSame('viewer', DB::table('victory_project_access')->where('user_id', $this->member->id)->where('project_id', $this->project->id)->value('role'));
+        $this->putJson($path, ['request_id' => (string) Str::uuid(), 'expected_projects' => $body['projects'], 'projects' => []])->assertOk();
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->getJson('/api/v1/projects/' . $this->project->hashed_id)->assertNotFound();
+    }
+
+    public function test_source_grant_replacement_cannot_change_native_administrator_or_financial_authority(): void
+    {
+        $this->withHeaders(['X-API-TOKEN' => $this->token]);
+        $body = ['request_id' => (string) Str::uuid(), 'expected_projects' => [], 'projects' => []];
+        $this->putJson('/api/v1/victory/access/users/' . $this->user->hashed_id . '/grants', $body)->assertConflict();
+        $this->putJson('/api/v1/victory/access/users/' . $this->member->hashed_id . '/grants', [...$body, 'is_admin' => true])->assertUnprocessable();
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->putJson('/api/v1/victory/access/users/' . $this->user->hashed_id . '/grants', $body)->assertForbidden();
+    }
+
     public function test_no_grants_means_no_projects_even_with_native_view_all_permission(): void
     {
         $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->getJson('/api/v1/projects')

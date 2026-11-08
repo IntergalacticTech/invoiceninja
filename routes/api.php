@@ -425,8 +425,14 @@ Route::group(['middleware' => ['throttle:api', 'token_auth', \App\Http\Middlewar
     Route::get('victory/access/me', [\App\Http\Controllers\Victory\ProjectAccessController::class, 'me']);
     Route::get('victory/access/users', [\App\Http\Controllers\Victory\ProjectAccessController::class, 'index']);
     Route::put('victory/access/users/{user}', [\App\Http\Controllers\Victory\ProjectAccessController::class, 'update']);
+    Route::put('victory/access/users/{user}/grants', [\App\Http\Controllers\Victory\ProjectAccessController::class, 'replaceGrants']);
+    Route::put('victory/access/users/{user}/role', [\App\Http\Controllers\Victory\ProjectAccessController::class, 'replaceRole']);
+    Route::post('victory/projects', [\App\Http\Controllers\Victory\WorkspaceProjectController::class, 'store']);
+    Route::put('victory/projects/{project}', [\App\Http\Controllers\Victory\WorkspaceProjectController::class, 'update']);
+    Route::post('victory/projects/{project}/archive', [\App\Http\Controllers\Victory\WorkspaceProjectController::class, 'archive']);
 
     Route::post('victory/workspace/timer-task', [\App\Http\Controllers\Victory\WorkspaceTimerController::class, 'task']);
+    Route::post('victory/workspace/timer-create', [\App\Http\Controllers\Victory\WorkspaceTimerController::class, 'createAndStart']);
     Route::post('victory/tasks/{task}/timer-note', [\App\Http\Controllers\Victory\WorkspaceTimerController::class, 'note']);
     Route::post('victory/workspace/tasks', [\App\Http\Controllers\Victory\WorkspaceTaskController::class, 'store']);
     Route::post('victory/tasks/{task}/workspace', [\App\Http\Controllers\Victory\WorkspaceTaskController::class, 'update']);
