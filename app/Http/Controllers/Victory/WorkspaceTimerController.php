@@ -18,6 +18,30 @@ class WorkspaceTimerController extends Controller
 {
     use MakesHash;
 
+    /** Create and start one owned task atomically; a blocked timer creates nothing. */
+    public function createAndStart(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $user = auth()->user();
+        abort_unless($user->can('create', Task::class), 403);
+        abort_if(array_diff(array_keys($request->all()), ['request_id', 'project_id', 'description']), 422);
+        $data = $request->validate(['request_id' => ['required', 'uuid'], 'project_id' => ['required', 'string'],
+            'description' => ['required', 'string', 'min:1', 'max:10000']]);
+        $result = WorkspaceCommands::run($data['request_id'], 'create_and_start_timer', $data, function () use ($data, $user) {
+            CompanyUser::where('company_id', $user->companyId())->where('user_id', $user->id)->lockForUpdate()->firstOrFail();
+            $project = Project::where('company_id', $user->companyId())->where('is_deleted', false)
+                ->find($this->decodePrimaryKey($data['project_id']));
+            abort_unless($project, 404);
+            WorkspaceCommands::requireNoCompetingTimer($user->companyId(), $user->id, null);
+            $repository = app(TaskRepository::class);
+            $task = $repository->save(['project_id' => $project->id, 'client_id' => $project->client_id,
+                'assigned_user_id' => $user->id, 'description' => $data['description']], TaskFactory::create($user->companyId(), $user->id));
+            $repository->start($task);
+            WorkspaceCommands::normalizeRunningInterval($task);
+            return ['id' => $task->hashed_id];
+        });
+        return response()->json(['data' => $result], 201);
+    }
+
     public function task(Request $request): \Illuminate\Http\JsonResponse
     {
         $user = auth()->user();

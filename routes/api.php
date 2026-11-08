@@ -431,6 +431,7 @@ Route::group(['middleware' => ['throttle:api', 'token_auth', \App\Http\Middlewar
     Route::post('victory/projects/{project}/archive', [\App\Http\Controllers\Victory\WorkspaceProjectController::class, 'archive']);
 
     Route::post('victory/workspace/timer-task', [\App\Http\Controllers\Victory\WorkspaceTimerController::class, 'task']);
+    Route::post('victory/workspace/timer-create', [\App\Http\Controllers\Victory\WorkspaceTimerController::class, 'createAndStart']);
     Route::post('victory/tasks/{task}/timer-note', [\App\Http\Controllers\Victory\WorkspaceTimerController::class, 'note']);
     Route::post('victory/workspace/tasks', [\App\Http\Controllers\Victory\WorkspaceTaskController::class, 'store']);
     Route::post('victory/tasks/{task}/workspace', [\App\Http\Controllers\Victory\WorkspaceTaskController::class, 'update']);

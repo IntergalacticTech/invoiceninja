@@ -70,6 +70,35 @@ class ProjectAccessTest extends TestCase
         $this->postJson('/api/v1/victory/projects', [...$body, 'request_id' => (string) Str::uuid(), 'task_rate' => 123])->assertUnprocessable();
     }
 
+    public function test_new_timer_task_starts_atomically_and_replay_never_duplicates_time(): void
+    {
+        $this->grant();
+        $body = ['request_id' => (string) Str::uuid(), 'project_id' => $this->project->hashed_id, 'description' => 'New timer work'];
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken]);
+        $id = $this->postJson('/api/v1/victory/workspace/timer-create', $body)->assertCreated()->json('data.id');
+        $task = Task::findOrFail($this->decodePrimaryKey($id));
+        $before = $task->time_log;
+        $this->assertTrue((bool) $task->is_running);
+        $this->assertSame($this->member->id, $task->assigned_user_id);
+        $this->postJson('/api/v1/victory/workspace/timer-create', $body)->assertCreated()->assertJsonPath('data.id', $id);
+        $this->assertSame($before, $task->fresh()->time_log);
+        $count = Task::where('company_id', $this->company->id)->count();
+        $this->postJson('/api/v1/victory/workspace/timer-create', [...$body, 'request_id' => (string) Str::uuid(), 'description' => 'Competing timer'])->assertConflict();
+        $this->assertSame($count, Task::where('company_id', $this->company->id)->count());
+        $this->assertSame($before, $task->fresh()->time_log);
+    }
+
+    public function test_create_and_start_timer_preserves_viewer_and_project_boundaries(): void
+    {
+        $this->grant('viewer');
+        $body = ['request_id' => (string) Str::uuid(), 'project_id' => $this->project->hashed_id, 'description' => 'Denied timer'];
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->postJson('/api/v1/victory/workspace/timer-create', $body)->assertForbidden();
+        $this->grant('contributor');
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->postJson('/api/v1/victory/workspace/timer-create', [...$body, 'assigned_user_id' => $this->user->hashed_id])->assertForbidden();
+        $other = Project::factory()->create(['company_id' => $this->company->id, 'client_id' => $this->client->id, 'user_id' => $this->user->id]);
+        $this->postJson('/api/v1/victory/workspace/timer-create', [...$body, 'project_id' => $other->hashed_id])->assertForbidden();
+    }
+
     public function test_new_project_operations_keep_source_administrator_and_company_boundaries(): void
     {
         $this->grant('manager');

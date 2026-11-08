@@ -134,7 +134,7 @@ class VictoryProjectAccess
         }
         if ($request->isMethod('POST') && $path === 'victory/expenses') return;
         $project = null;
-        if ($request->isMethod('POST') && in_array($path, ['tasks', 'victory/tasks', 'victory/workspace/tasks', 'victory/workspace/timer-task'], true)) {
+        if ($request->isMethod('POST') && in_array($path, ['tasks', 'victory/tasks', 'victory/workspace/tasks', 'victory/workspace/timer-task', 'victory/workspace/timer-create'], true)) {
             $project = $this->decodePrimaryKey((string) $request->input('project_id', ''));
             if ($path === 'tasks') {
                 $this->deliveryFields($request);
