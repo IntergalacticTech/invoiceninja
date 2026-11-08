@@ -78,6 +78,8 @@ class ProjectAccessTest extends TestCase
         $this->withHeaders(['X-API-TOKEN' => $this->token])->putJson($path, $body)->assertOk()->assertJsonPath('data.role', 'admin');
         $this->putJson($path, $body)->assertOk();
         $this->assertTrue((bool) \App\Models\CompanyUser::where('user_id', $this->member->id)->where('company_id', $this->company->id)->value('is_admin'));
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->getJson('/api/v1/victory/access/users')->assertOk();
+        $this->withHeaders(['X-API-TOKEN' => $this->token]);
         $this->putJson($path, ['request_id' => (string) Str::uuid(), 'expected_role' => 'member', 'role' => 'member'])->assertConflict();
         $this->putJson($path, ['request_id' => (string) Str::uuid(), 'expected_role' => 'admin', 'role' => 'member'])->assertOk();
         $this->assertSame('viewer', DB::table('victory_project_access')->where('user_id', $this->member->id)->where('project_id', $this->project->id)->value('role'));
