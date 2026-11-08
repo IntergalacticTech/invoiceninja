@@ -77,8 +77,9 @@ class ProjectAccessTest extends TestCase
         $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->postJson('/api/v1/victory/projects', $body)->assertForbidden();
         $this->putJson('/api/v1/victory/projects/' . $this->project->hashed_id, ['request_id' => (string) Str::uuid(), 'expected_updated_at' => (int) $this->project->updated_at, 'name' => 'Denied'])->assertForbidden();
         $this->postJson('/api/v1/victory/projects/' . $this->project->hashed_id . '/archive', ['request_id' => (string) Str::uuid(), 'expected_updated_at' => (int) $this->project->updated_at, 'action' => 'archive'])->assertForbidden();
-        $this->withHeaders(['X-API-TOKEN' => $this->token])->postJson('/api/v1/victory/projects', [...$body, 'client_id' => 'missing'])->assertNotFound();
-        $this->postJson('/api/v1/victory/projects', [...$body, 'assigned_user_id' => 'missing'])->assertUnprocessable();
+        $missing = $this->encodePrimaryKey(999999999);
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->postJson('/api/v1/victory/projects', [...$body, 'client_id' => $missing])->assertNotFound();
+        $this->postJson('/api/v1/victory/projects', [...$body, 'assigned_user_id' => $missing])->assertUnprocessable();
         $this->assertNotSame('Denied', $this->project->fresh()->name);
     }
 
