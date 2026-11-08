@@ -26,8 +26,16 @@ class WorkspaceTimerController extends Controller
         abort_if(array_diff(array_keys($request->all()), ['request_id', 'project_id', 'description']), 422);
         $data = $request->validate(['request_id' => ['required', 'uuid'], 'project_id' => ['required', 'string'],
             'description' => ['required', 'string', 'min:1', 'max:10000']]);
-        $result = WorkspaceCommands::run($data['request_id'], 'create_and_start_timer', $data, function () use ($data, $user) {
-            CompanyUser::where('company_id', $user->companyId())->where('user_id', $user->id)->lockForUpdate()->firstOrFail();
+        $authorize = function () use ($data, $user) {
+            WorkspaceCommands::lockCurrentActor();
+            abort_unless($user->can('create', Task::class), 403);
+            if (config('ninja.victory_project_access_enabled', false) && !$user->isSuperUser()) {
+                abort_unless(app(\App\Services\Victory\ProjectAccess::class)->canWrite($this->decodePrimaryKey($data['project_id'])), 403,
+                    'Current project contribution permission is required.');
+            }
+        };
+        $result = WorkspaceCommands::runAuthorized($data['request_id'], 'create_and_start_timer', $data, $authorize, function () use ($data, $user, $authorize) {
+            $authorize();
             $project = Project::where('company_id', $user->companyId())->where('is_deleted', false)
                 ->find($this->decodePrimaryKey($data['project_id']));
             abort_unless($project, 404);

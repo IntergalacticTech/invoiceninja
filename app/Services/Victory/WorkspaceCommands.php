@@ -3,11 +3,66 @@
 namespace App\Services\Victory;
 
 use Closure;
+use App\Models\CompanyUser;
+use App\Models\User;
+use App\Utils\TruthSource;
 use Illuminate\Support\Facades\DB;
 
 /** The receipt and its database effect commit together, including uncertain HTTP replies. */
 class WorkspaceCommands
 {
+    /** Re-authorize after any receipt/row wait, holding membership until commit. */
+    public static function lockCurrentActor(bool $administrator = false, array $alsoLockUserIds = []): CompanyUser
+    {
+        if (DB::connection()->transactionLevel() < 1) {
+            throw new \LogicException('Current workspace authority requires a transaction.');
+        }
+        $user = auth()->user();
+        abort_unless($user instanceof User, 403);
+        $companyId = $user->companyId();
+        // Match role replacement's order when two administrators affect one
+        // another. A waiting locking read observes the committed current row.
+        $members = CompanyUser::where('company_id', $companyId)
+            ->whereIn('user_id', array_unique([$user->id, ...$alsoLockUserIds]))
+            ->orderBy('user_id')->lockForUpdate()->get()->keyBy('user_id');
+        $membership = $members->get($user->id);
+        $active = User::where('id', $user->id)->where('account_id', $user->account_id)
+            ->where('is_deleted', false)->lockForUpdate()->first();
+        abort_unless($active && $membership && !$membership->is_locked, 403,
+            'Current active company membership is required.');
+        abort_if($administrator && !($membership->is_admin || $membership->is_owner), 403,
+            'Current native administrator authority is required.');
+
+        // Native policies use token()->cu, loaded before the request reached
+        // this transaction. Replace that stale relation before invoking them.
+        $token = $user->token();
+        abort_unless($token && (int) $token->company_id === $companyId
+            && (int) $token->user_id === (int) $user->id, 403);
+        $token->setRelation('cu', $membership);
+        app(TruthSource::class)->setCompanyUser($membership);
+        $access = app(ProjectAccess::class);
+        $access->companyId = null;
+        $access->roles = [];
+        if (config('ninja.victory_project_access_enabled', false)
+            && !($membership->is_admin || $membership->is_owner)) {
+            // A request which entered as an administrator skipped middleware's
+            // member scope. Demotion must not preserve that bypass.
+            $access->companyId = $companyId;
+            $access->roles = DB::table('victory_project_access')->where('company_id', $companyId)
+                ->where('user_id', $user->id)->pluck('role', 'project_id')->all();
+        }
+        return $membership;
+    }
+
+    /** Current authority also gates a cached receipt, with locks held to commit. */
+    public static function runAuthorized(string $requestId, string $operation, array $payload, Closure $authorize, Closure $work): array
+    {
+        return DB::transaction(function () use ($requestId, $operation, $payload, $authorize, $work) {
+            $authorize();
+            return self::run($requestId, $operation, $payload, $work);
+        });
+    }
+
     /** Caller holds the time owner's company-user lock in its transaction. */
     public static function requireNoCompetingTimer(int $companyId, int $ownerId, ?int $exceptTaskId): void
     {

@@ -92,9 +92,13 @@ class ProjectAccessController extends Controller
         $normalize = fn ($grants) => collect($grants)->map(fn ($g) => ['project_id' => (string) $g['project_id'], 'role' => (string) $g['role']])->sortBy('project_id')->values()->all();
         $data['projects'] = $normalize($data['projects']);
         $data['expected_projects'] = $normalize($data['expected_projects']);
-        $result = \App\Services\Victory\WorkspaceCommands::run($data['request_id'], 'replace_project_grants:' . $user, $data, function () use ($actor, $target, $data, $normalize) {
+        $result = \App\Services\Victory\WorkspaceCommands::runAuthorized($data['request_id'], 'replace_project_grants:' . $user, $data,
+            fn () => \App\Services\Victory\WorkspaceCommands::lockCurrentActor(true, [$target->id]), function () use ($actor, $target, $data, $normalize) {
+            \App\Services\Victory\WorkspaceCommands::lockCurrentActor(true, [$target->id]);
             $membership = CompanyUser::where('company_id', $actor->companyId())->where('user_id', $target->id)->lockForUpdate()->first();
-            abort_unless($membership && !$membership->is_locked, 404);
+            $activeTarget = User::where('id', $target->id)
+                ->where('is_deleted', false)->lockForUpdate()->first();
+            abort_unless($membership && !$membership->is_locked && $activeTarget, 404);
             // Project grants cannot narrow a native administrator. Make that limit explicit.
             abort_if($membership->is_admin || $membership->is_owner, 409, 'Administrator access is controlled by the native company role.');
             $query = DB::table('victory_project_access')->where('company_id', $actor->companyId())->where('user_id', $target->id);
@@ -127,15 +131,19 @@ class ProjectAccessController extends Controller
         $target = User::where('account_id', $actor->account_id)->where('is_deleted', false)->find($this->decodePrimaryKey($user));
         abort_unless($target, 404);
         abort_if($target->id === $actor->id, 409, 'Another administrator must review changes to your native role.');
-        $result = \App\Services\Victory\WorkspaceCommands::run($data['request_id'], 'replace_company_role:' . $user, $data, function () use ($actor, $target, $data) {
+        $result = \App\Services\Victory\WorkspaceCommands::runAuthorized($data['request_id'], 'replace_company_role:' . $user, $data,
+            fn () => \App\Services\Victory\WorkspaceCommands::lockCurrentActor(true, [$target->id]), function () use ($actor, $target, $data) {
+            \App\Services\Victory\WorkspaceCommands::lockCurrentActor(true, [$target->id]);
             // Stable lock order prevents two administrators editing one another
             // from deadlocking; the owner is immutable, preserving a recovery role.
             $members = CompanyUser::where('company_id', $actor->companyId())->whereIn('user_id', [$actor->id, $target->id])
                 ->orderBy('user_id')->lockForUpdate()->get()->keyBy('user_id');
             $currentActor = $members->get($actor->id);
             $member = $members->get($target->id);
+            $activeTarget = User::where('id', $target->id)->where('account_id', $actor->account_id)
+                ->where('is_deleted', false)->lockForUpdate()->first();
             abort_unless($currentActor && !$currentActor->is_locked && ($currentActor->is_admin || $currentActor->is_owner), 403);
-            abort_unless($member && !$member->is_locked && !$target->fresh()->is_deleted, 404);
+            abort_unless($member && !$member->is_locked && $activeTarget, 404);
             abort_if($member->is_owner, 409, 'The native company owner role cannot be changed here.');
             $before = $member->is_admin ? 'admin' : 'member';
             abort_unless($before === $data['expected_role'], 409, 'The native role changed. Review current access before applying.');
