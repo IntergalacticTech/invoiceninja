@@ -70,6 +70,34 @@ class ProjectAccessTest extends TestCase
         $this->postJson('/api/v1/victory/projects', [...$body, 'request_id' => (string) Str::uuid(), 'task_rate' => 123])->assertUnprocessable();
     }
 
+    public function test_native_company_role_changes_are_current_state_checked_and_preserve_grants(): void
+    {
+        $this->grant('viewer');
+        $path = '/api/v1/victory/access/users/' . $this->member->hashed_id . '/role';
+        $body = ['request_id' => (string) Str::uuid(), 'expected_role' => 'member', 'role' => 'admin'];
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->putJson($path, $body)->assertOk()->assertJsonPath('data.role', 'admin');
+        $this->putJson($path, $body)->assertOk();
+        $this->assertTrue((bool) \App\Models\CompanyUser::where('user_id', $this->member->id)->where('company_id', $this->company->id)->value('is_admin'));
+        $this->putJson($path, ['request_id' => (string) Str::uuid(), 'expected_role' => 'member', 'role' => 'member'])->assertConflict();
+        $this->putJson($path, ['request_id' => (string) Str::uuid(), 'expected_role' => 'admin', 'role' => 'member'])->assertOk();
+        $this->assertSame('viewer', DB::table('victory_project_access')->where('user_id', $this->member->id)->where('project_id', $this->project->id)->value('role'));
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->getJson('/api/v1/victory/access/users')->assertForbidden();
+    }
+
+    public function test_company_role_endpoint_cannot_change_self_owner_or_cross_company_user(): void
+    {
+        $body = ['request_id' => (string) Str::uuid(), 'expected_role' => 'admin', 'role' => 'member'];
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->putJson('/api/v1/victory/access/users/' . $this->user->hashed_id . '/role', $body)->assertConflict();
+        $this->putJson('/api/v1/victory/access/users/' . $this->member->hashed_id . '/role', [...$body, 'is_owner' => true])->assertUnprocessable();
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->putJson('/api/v1/victory/access/users/' . $this->user->hashed_id . '/role', $body)->assertForbidden();
+        $this->withHeaders(['X-API-TOKEN' => $this->token])->putJson('/api/v1/victory/access/users/' . $this->encodePrimaryKey(999999999) . '/role', $body)->assertNotFound();
+        // Give a second administrator authority to prove the owner protection,
+        // independently of the self-change guard.
+        \App\Models\CompanyUser::where('company_id', $this->company->id)->where('user_id', $this->member->id)->update(['is_admin' => true]);
+        \App\Models\CompanyUser::where('company_id', $this->company->id)->where('user_id', $this->user->id)->update(['is_owner' => true]);
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->putJson('/api/v1/victory/access/users/' . $this->user->hashed_id . '/role', $body)->assertConflict();
+    }
+
     public function test_new_timer_task_starts_atomically_and_replay_never_duplicates_time(): void
     {
         $this->grant();

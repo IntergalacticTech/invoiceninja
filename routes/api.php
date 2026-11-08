@@ -426,6 +426,7 @@ Route::group(['middleware' => ['throttle:api', 'token_auth', \App\Http\Middlewar
     Route::get('victory/access/users', [\App\Http\Controllers\Victory\ProjectAccessController::class, 'index']);
     Route::put('victory/access/users/{user}', [\App\Http\Controllers\Victory\ProjectAccessController::class, 'update']);
     Route::put('victory/access/users/{user}/grants', [\App\Http\Controllers\Victory\ProjectAccessController::class, 'replaceGrants']);
+    Route::put('victory/access/users/{user}/role', [\App\Http\Controllers\Victory\ProjectAccessController::class, 'replaceRole']);
     Route::post('victory/projects', [\App\Http\Controllers\Victory\WorkspaceProjectController::class, 'store']);
     Route::put('victory/projects/{project}', [\App\Http\Controllers\Victory\WorkspaceProjectController::class, 'update']);
     Route::post('victory/projects/{project}/archive', [\App\Http\Controllers\Victory\WorkspaceProjectController::class, 'archive']);
