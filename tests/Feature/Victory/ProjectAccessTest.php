@@ -745,4 +745,125 @@ class ProjectAccessTest extends TestCase
         $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->getJson($path)->assertNotFound();
     }
 
+    private function discoveryProject(): Project
+    {
+        $id = $this->withHeaders(['X-API-TOKEN' => $this->token])
+            ->postJson('/api/v1/victory/projects', ['request_id' => (string) Str::uuid(),
+                'client_id' => $this->client->hashed_id, 'name' => 'Workflow discovery fixture'])
+            ->assertCreated()->json('data.id');
+
+        return Project::findOrFail($this->decodePrimaryKey($id));
+    }
+
+    private function discoveryStatus(string $name, int $order): \App\Models\TaskStatus
+    {
+        return \App\Models\TaskStatus::factory()->create(['company_id' => $this->company->id,
+            'user_id' => $this->user->id, 'name' => $name, 'color' => '#123456', 'status_order' => $order]);
+    }
+
+    public function test_unconfigured_workflow_keeps_unused_choices_after_first_native_task(): void
+    {
+        $project = $this->discoveryProject();
+        $backlog = $this->discoveryStatus('Discovery Backlog', 50);
+        $ready = $this->discoveryStatus('Discovery Ready', 51);
+        $path = '/api/v1/victory/projects/' . $project->hashed_id . '/workflow';
+        $this->assertSame(0, Task::where('project_id', $project->id)->count());
+        $before = $this->getJson($path)->assertOk()->assertJsonPath('data.configured', false)->json('data.statuses');
+        $this->assertContains($ready->hashed_id, array_column($before, 'id'));
+
+        $id = $this->postJson('/api/v1/victory/tasks', ['request_id' => (string) Str::uuid(),
+            'project_id' => $project->hashed_id, 'description' => 'Workflow transition fixture',
+            'status_id' => $backlog->hashed_id])->assertCreated()->json('data.id');
+        $task = Task::findOrFail($this->decodePrimaryKey($id));
+        $this->assertSame($backlog->id, (int) $task->status_id);
+        $after = $this->getJson($path)->assertOk()->assertJsonPath('data.configured', false)->json('data.statuses');
+        // The first Backlog task must not withdraw the Ready choice just offered.
+        $this->assertEqualsCanonicalizing(array_column($before, 'id'), array_column($after, 'id'));
+        $this->assertContains($ready->hashed_id, array_column($after, 'id'));
+
+        $original = $task->getAttributes();
+        $this->postJson('/api/v1/victory/tasks/' . $id . '/workflow',
+            ['request_id' => (string) Str::uuid(), 'status_id' => $ready->hashed_id])
+            ->assertOk()->assertJsonPath('data.updated', 1);
+        $this->assertSame($ready->id, (int) $task->fresh()->status_id);
+        foreach (['description', 'time_log', 'rate', 'invoice_id', 'project_id', 'user_id', 'assigned_user_id'] as $field) {
+            $this->assertEquals($original[$field] ?? null, $task->fresh()->getAttributes()[$field] ?? null, $field);
+        }
+        $this->assertSame(0, DB::table('victory_project_workflows')->where('project_id', $project->id)->count());
+    }
+
+    public function test_configured_workflow_still_excludes_unused_unconfigured_statuses(): void
+    {
+        $project = $this->discoveryProject();
+        $backlog = $this->discoveryStatus('Configured Backlog', 50);
+        $ready = $this->discoveryStatus('Configured Ready', 51);
+        $other = $this->discoveryStatus('Unused third choice', 52);
+        $path = '/api/v1/victory/projects/' . $project->hashed_id . '/workflow';
+        $this->putJson($path, ['statuses' => [
+            ['id' => $ready->hashed_id, 'name' => $ready->name, 'color' => '#abcdef', 'is_done' => false],
+            ['id' => $backlog->hashed_id, 'name' => $backlog->name, 'color' => '#654321', 'is_done' => false],
+        ], 'sections' => ['Delivery']])->assertOk()->assertJsonPath('data.configured', true);
+        $this->postJson('/api/v1/victory/tasks', ['request_id' => (string) Str::uuid(),
+            'project_id' => $project->hashed_id, 'description' => 'Configured workflow fixture',
+            'status_id' => $backlog->hashed_id])->assertCreated();
+        $data = $this->getJson($path)->assertOk()->assertJsonPath('data.configured', true)->json('data');
+        $this->assertSame([$ready->hashed_id, $backlog->hashed_id], array_column($data['statuses'], 'id'));
+        $this->assertNotContains($other->hashed_id, array_column($data['statuses'], 'id'));
+        $this->assertSame('#abcdef', $data['statuses'][0]['color']);
+        $this->assertSame([0, 1], array_column($data['statuses'], 'status_order'));
+        $this->assertSame(['Delivery'], $data['sections']);
+    }
+
+    public function test_workflow_discovery_and_moves_keep_company_and_archived_status_boundaries(): void
+    {
+        $project = $this->discoveryProject();
+        $backlog = $this->discoveryStatus('Scoped Backlog', 50);
+        $archived = $this->discoveryStatus('Archived choice', 51);
+        $archived->delete();
+        $company = \App\Models\Company::factory()->create(['account_id' => $this->account->id]);
+        $foreign = \App\Models\TaskStatus::factory()->create(['company_id' => $company->id, 'user_id' => $this->user->id]);
+        $foreignProject = Project::factory()->create(['company_id' => $company->id, 'user_id' => $this->user->id,
+            'client_id' => $this->client->id]);
+        $statuses = $this->getJson('/api/v1/victory/projects/' . $project->hashed_id . '/workflow')->assertOk()->json('data.statuses');
+        $this->assertNotContains($foreign->hashed_id, array_column($statuses, 'id'));
+        $this->assertNotContains($archived->hashed_id, array_column($statuses, 'id'));
+        $this->getJson('/api/v1/victory/projects/' . $foreignProject->hashed_id . '/workflow')->assertNotFound();
+        $id = $this->postJson('/api/v1/victory/tasks', ['request_id' => (string) Str::uuid(),
+            'project_id' => $project->hashed_id, 'description' => 'Company-scoped workflow fixture',
+            'status_id' => $backlog->hashed_id])->assertCreated()->json('data.id');
+        $task = Task::findOrFail($this->decodePrimaryKey($id));
+        foreach ([$foreign, $archived] as $unavailable) {
+            $request = (string) Str::uuid();
+            $denied = $this->postJson('/api/v1/victory/tasks/' . $id . '/workflow',
+                ['request_id' => $request, 'status_id' => $unavailable->hashed_id])->assertStatus(400);
+            // The unchanged JSON exception handler maps missing native models to 400.
+            $this->assertStringStartsWith('No query results for model [App\\Models\\TaskStatus]', $denied->json('message'));
+            $this->assertSame($backlog->id, (int) $task->fresh()->status_id);
+            $this->assertSame(0, DB::table('victory_workspace_commands')->where('request_id', $request)->count());
+        }
+    }
+
+    public function test_workflow_discovery_does_not_grant_an_unassigned_member_write_authority(): void
+    {
+        $this->project = $this->discoveryProject();
+        $backlog = $this->discoveryStatus('Member Backlog', 50);
+        $ready = $this->discoveryStatus('Member Ready', 51);
+        $id = $this->postJson('/api/v1/victory/tasks', ['request_id' => (string) Str::uuid(),
+            'project_id' => $this->project->hashed_id, 'description' => 'Member boundary fixture',
+            'status_id' => $backlog->hashed_id])->assertCreated()->json('data.id');
+        $path = '/api/v1/victory/projects/' . $this->project->hashed_id . '/workflow';
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->getJson($path)->assertNotFound();
+        $this->grant('viewer');
+        $this->withHeaders(['X-API-TOKEN' => $this->memberToken])->getJson($path)->assertOk();
+        $request = (string) Str::uuid();
+        // Project-access middleware refuses a viewer before the write controller runs.
+        $this->postJson('/api/v1/victory/tasks/' . $id . '/workflow',
+            ['request_id' => $request, 'status_id' => $ready->hashed_id])->assertForbidden();
+        $this->putJson($path, ['statuses' => [
+            ['id' => $ready->hashed_id, 'name' => $ready->name, 'color' => '#123456', 'is_done' => false],
+        ], 'sections' => []])->assertForbidden();
+        $this->assertSame($backlog->id, (int) Task::findOrFail($this->decodePrimaryKey($id))->status_id);
+        $this->assertSame(0, DB::table('victory_workspace_commands')->where('request_id', $request)->count());
+    }
+
 }
