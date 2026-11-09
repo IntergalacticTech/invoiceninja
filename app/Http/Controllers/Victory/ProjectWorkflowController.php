@@ -23,7 +23,7 @@ class ProjectWorkflowController extends Controller
         $used = Task::where('project_id', $project->id)->where('is_deleted', false)->distinct()->pluck('status_id')->filter()->all();
         $configured = collect($configuration['statuses'] ?? [])->keyBy('id');
         $statusQuery = TaskStatus::where('company_id', $project->company_id)->orderBy('status_order');
-        if ($used || $configured->isNotEmpty()) $statusQuery->whereIn('id', array_unique(array_merge($used, $configured->keys()->map(fn ($id) => $this->decodePrimaryKey($id))->all())));
+        if ($record && ($used || $configured->isNotEmpty())) $statusQuery->whereIn('id', array_unique(array_merge($used, $configured->keys()->map(fn ($id) => $this->decodePrimaryKey($id))->all())));
         $statuses = $statusQuery->get()->map(function ($status) use ($configured) {
             $override = $configured->get($status->hashed_id, []);
             return ['id' => $status->hashed_id, 'name' => $status->name, 'color' => $override['color'] ?? $status->color,
